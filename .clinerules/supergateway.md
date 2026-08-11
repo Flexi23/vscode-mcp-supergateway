@@ -1,0 +1,1 @@
+All agent behavior and operations **must strictly adhere** to the guidelines specified in `vscode-mcp-supergateway/AGENT_INSTRUCTIONS.md`. These instructions represent mandatory constraints for all execution steps.

@@ -1,0 +1,36 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "start supergateway",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}/.vscode/supergateway.ps1",
+				"start"
+			],
+			"runOptions": {
+				"runOn": "folderOpen"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "stop supergateway",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}/.vscode/supergateway.ps1",
+				"stop"
+			],
+			"problemMatcher": []
+		}
+	]
+}
