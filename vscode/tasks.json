@@ -2,7 +2,7 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "start supergateway",
+			"label": "Start Supergateway",
 			"type": "shell",
 			"command": "powershell",
 			"args": [
@@ -19,7 +19,7 @@
 			"problemMatcher": []
 		},
 		{
-			"label": "stop supergateway",
+			"label": "Stop Supergateway",
 			"type": "shell",
 			"command": "powershell",
 			"args": [

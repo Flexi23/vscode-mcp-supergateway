@@ -1,11 +1,11 @@
-# Welcome to vscode-mcp-supergateway
+# Welcome to Visual Studio Code Super Gateway
 
 ## Overview
 
-This is the main documentation for the `vscode-mcp-supergateway` project. It outlines the purpose and functionality of the project. The system utilizes Model Context Protocol (MCP) to aggregate various services into a unified interface, enabling them to be used together by AI tools like Copilot and Cline. More information about the core technology can be found at [supergateway](https://github.com/supercorp-ai/supergateway).
+This is the main documentation for the `vscode-mcp-supergateway` project. It outlines the purpose and functionality of the project. The system utilizes Model Context Protocol (MCP) to aggregate various services into a unified interface, enabling them to be used together by AI tools like Copilot and ML Studio. More information about the core technology can be found at [supergateway](https://github.com/supercorp-ai/supergateway).
 
 ### Project Purpose
-The `vscode-mcp-supergateway` project serves as a gateway layer that bridges Model Context Protocol (MCP) servers with VS Code's MCP integration. It allows AI assistants (such as Copilot and Cline) to access and orchestrate multiple backend services through a single unified interface.
+The `vscode-mcp-supergateway` project serves as a gateway layer that bridges Model Context Protocol (MCP) servers with VS Code's MCP integration. It allows AI assistants (such as Copilot and ML Studio) to access and orchestrate multiple backend services through a single unified interface.
 
 ## Directory Structure
 
@@ -18,10 +18,6 @@ Contains workspace-specific configuration files for the VS Code MCP integration:
 - `tasks.json` – Task definitions and workflow configurations. Defines reusable task templates for common operations such as model loading, service orchestration, and cleanup routines.
 - `supergateway.js` – HTTP Proxy Server that exposes stdio-based MCP servers over HTTP (see below). This is the core component that bridges MCP protocol communication with standard HTTP/HTTPS access for AI clients.
 
-### `.clinerules/`
-Contains agent rule configurations and behavior guidelines:
-- `vscode-mcp-supergateway.md` – Core instructions for AI agents operating within this environment (mandatory compliance rules)
-
 ### `AGENT_INSTRUCTIONS.md`
 Defines best practices, role guidelines, and operational constraints for all AI agents that interact with the supergateway. All agent behavior must strictly adhere to these guidelines.
 
@@ -30,13 +26,13 @@ Tracks semantic versioning updates and release history.
 
 ## MCP Proxy Server (`supergateway.js`)
 
-This component implements an **HTTP Proxy Server** that acts as a gateway for Model Context Protocol (MCP) communication. It bridges stdio-based MCP server communication with HTTP access, enabling AI tools like Copilot and Cline to interact with aggregated services through a web interface.
+This component implements an **HTTP Proxy Server** that acts as a gateway for Model Context Protocol (MCP) communication. It bridges stdio-based MCP server communication with HTTP access, enabling AI tools like Copilot and ML Studio to interact with aggregated services through a web interface.
 
 ### Key Functionalities
 
 1. **HTTP Server On Port 8083**
    - Starts an HTTP server on port `8083` at the path `/mcp`
-   - Listens for incoming MCP protocol requests from AI clients (Copilot, Cline, etc.)
+   - Listens for incoming MCP protocol requests from AI clients (Copilot, ML Studio, etc.)
    - Serves as the primary entry point for external integration
    - Handles concurrent connections using async/await patterns
 
@@ -99,7 +95,7 @@ graph TD
 ### Steps
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/supercorp-ai/vscode-mcp-supergateway.git
+   git clone https://github.com/Flexi23/vscode-mcp-supergateway.git
    cd vscode-mcp-supergateway
    ```
 
