@@ -14,7 +14,7 @@ graph
     end
 
     subgraph Loopback["Local Worker Loopback"]
-        LMStudio_Worker["LM Studio MCP Server<br>(Local Small Models: Gemma 4 / LFM)"]
+        LMStudio_Worker["LM Studio MCP Server<br>(Gemma, LFM, Qwen, ...)"]
     end
 
     subgraph Backends["Local MCP Servers"]
