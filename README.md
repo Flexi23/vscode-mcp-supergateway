@@ -1,12 +1,26 @@
+# VS Code MCP Supergateway
+
+A centralized, multi-client Model Context Protocol (MCP) gateway that aggregates, routes, and offloads context between IDE clients, local LLM workers, and backend MCP services.
+
+---
+
+## 💡 Overview & Value Proposition
+
+As MCP usage grows, managing multiple disjointed MCP servers across different clients (VS Code/Copilot, LM Studio, etc.) becomes cumbersome. **VS Code MCP Supergateway** acts as a unified hub:
+
+1. **Multiplexing & Routing:** Connect multiple clients to a single, orchestrated MCP endpoint.
+2. **Context & Token Savings:** Keep expensive Frontier Model context clean by delegating repetitive context-structuring tasks to local worker models.
+3. **LM Studio Loopback Pattern:** Turn LM Studio into both an MCP consumer *and* a high-speed local MCP tool/worker for tasks like documentation linting, diff summarization, and task management.
+
 ---
 
 ## 🏗 Integration Flow
 
 ```mermaid
 graph
-    subgraph Clients["Clients (Frontier & Local)"]
-        Copilot["VS Code / Copilot Chat<br/>(Frontier Model / Strategy)"]
-        LMStudio_Host["LM Studio<br/>(Client UI)"]
+    subgraph Clients["Clients"]
+        Copilot["VS Code / Copilot Chat<br/>(Cloud Frontier Models)"]
+        LMStudio_Host["LM Studio Client UI"]
     end
 
     subgraph Gateway["HTTP MCP Gateway"]
@@ -14,7 +28,7 @@ graph
     end
 
     subgraph Loopback["Local Worker Loopback"]
-        LMStudio_Worker["LM Studio MCP Server<br>(Gemma, LFM, Qwen, ...)"]
+        LMStudio_Worker["LM Studio MCP Server<br>(Local Small Models: Gemma, LFM, Qwen, ...)"]
     end
 
     subgraph Backends["Local MCP Servers"]
@@ -24,7 +38,7 @@ graph
     end
 
     %% Client connections to Gateway
-    Supergateway -- "Local Agent Memory & Tools" --> Clients
+    Supergateway <-- "Local Memory & Mgmt Tools" --> Clients
     
     %% Gateway routes to Backends and Loopback Worker
     Supergateway --> CodebaseMemory
