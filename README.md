@@ -3,37 +3,36 @@
 ## 🏗 Integration Flow
 
 ```mermaid
-graph TD
-    subgraph Clients["Clients (Frontier & Local Hosts)"]
-        Copilot["Copilot / VS Code<br/>(Frontier Model / Strategy)"]
+graph
+    subgraph Clients["Clients (Frontier & Local)"]
+        Copilot["VS Code / Copilot Chat<br/>(Frontier Model / Strategy)"]
         LMStudio_Host["LM Studio<br/>(Client UI)"]
     end
 
-    subgraph Gateway["Core Gateway"]
-        Supergateway["Supergateway Server"]
+    subgraph Gateway["HTTP MCP Gateway"]
+        Supergateway["Supergateway Proxy"]
     end
 
     subgraph Loopback["Local Worker Loopback"]
-        LMStudio_Worker["LM Studio MCP Server<br/>(Local Small Models: Gemma 4 / LFM)"]
+        LMStudio_Worker["LM Studio MCP Server<br>(Local Small Models: Gemma 4 / LFM)"]
     end
 
-    subgraph Backends["MCP Servers (Backend & Memory)"]
+    subgraph Backends["Local MCP Servers"]
         CodebaseMemory["Codebase Memory"]
-        MarkdownVault["Markdown Vault<br/>(Tasks, ADRs & Specs)"]
+        MarkdownVault["Markdown Vault<br>(Tasks, ADRs & Specs)"]
         GitLab["GitLab Integration"]
     end
 
     %% Client connections to Gateway
-    Copilot -- "via MCP" --> Supergateway
-    LMStudio_Host -- "via MCP" --> Supergateway
-
+    Supergateway -- "Local Agent Memory & Tools" --> Clients
+    
     %% Gateway routes to Backends and Loopback Worker
     Supergateway --> CodebaseMemory
     Supergateway --> MarkdownVault
     Supergateway --> GitLab
     
     %% Loopback Worker Execution
-    Supergateway <-->|"Worker Loopback (Sub-Agent)"| LMStudio_Worker
+    Supergateway <-->|"Local Sub-Agents"| LMStudio_Worker
     LMStudio_Worker -. "Reads/Updates" .-> MarkdownVault
 ```
 
