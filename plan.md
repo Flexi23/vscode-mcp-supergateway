@@ -1,96 +1,135 @@
-LM Studio MCP Loopback Wrapper Implementation Plan
-Target Architecture: Integration of LM Studio's local inference API as an async Sub-Agent / Tool worker within vscode-mcp-supergateway.
+# Entwicklungsplan: vscode-mcp-supergateway
 
-1. Objective
-Implement an MCP-compliant wrapper inside the Supergateway that exposes local LLMs running in LM Studio (e.g., Qwen 2.5 Coder 3B/7B) as usable tools. This enables high-speed, zero-cloud-token task execution (diff summarization, ADR generation, Vault maintenance) triggered directly by primary IDE agents (Copilot/VS Code).
+## 1. Projektübersicht & Ausgangslage
 
-2. Prerequisites & Architecture Overview
-2.1 External Dependency
-LM Studio Local API Server running at http://localhost:1234/v1
+### Projektziel
+`vscode-mcp-supergateway` ist eine Visual Studio Code Extension zur nahtlosen Steuerung, Überwachung und Konfiguration von **Supergateway**-Instanzen. Supergateway verbindet Model Context Protocol (MCP) Server über verschiedene Transportschichten (Stdio, SSE, Streamable HTTP, WebSockets) und ermöglicht lokalen sowie Remote-KI-Clients den Zugriff auf MCP-Werkzeuge.
 
-OpenAI-compatible endpoints: /v1/chat/completions and /v1/models
+### Aktueller Status & Vorgeschichte
+- **Stand gestern**: Ein erster Entwicklungsplan für das Projekt wurde definiert.
+- **Lokale LLM-Hürden**: Es traten Start- und Ausführungsprobleme beim Einsatz von `Qwen2.5-Coder` in der lokalen Entwicklungsumgebung auf.
+- **Gemma-Implementierungsversuch**: Die Implementierung wurde stattdessen mit Gemma angestoßen (Commit `a37859b6278978c830019ad32aa3a85513169744`).
+- **Ergebnis**: Der Code-Push ist unvollständig geblieben und hat das Ziel nicht vollständig erreicht. Unfertige Schnittstellen, fehlende Event-Handler oder unvollständige Typdefinitionen müssen nun konsolidiert werden.
 
-2.2 Component Flow
-[ IDE / Copilot ] --> (MCP Call) --> [ Supergateway ] --> (HTTP / REST) --> [ LM Studio Server ]
-|                                   |
-+-------> (Reads/Writes) --> [ Vault ] <--+
+---
 
-3. Step-by-Step Implementation Tasks
-Phase 1: LM Studio Client Module
-Create a dedicated client service at src/services/lmstudio.ts to handle communication with LM Studio's REST API.
+## 2. Meilenstein-Übersicht
 
-Health Check & Model Discovery:
+```
+[Phase 0: Audit & Restrukturierung]
+       │
+       ▼
+[Phase 1: Lokale Agenten- & Tooling-Stabilisierung]
+       │
+       ▼
+[Phase 2: Supergateway Process Manager & Core Engine]
+       │
+       ▼
+[Phase 3: VS Code UI, TreeView & Developer Experience]
+       │
+       ▼
+[Phase 4: Fortgeschrittene Features & Security]
+       │
+       ▼
+[Phase 5: Tests, Dokumentation & Release]
+```
 
-Implement isServerAvailable(): Promise to verify port 1234.
+---
 
-Implement getActiveModel(): Promise by querying GET /v1/models.
+## 3. Detail-Fahrplan (Arbeitspakete)
 
-Completion Execution:
+### Phase 0: Audit & Code-Cleanup (Commit a37859b)
+Ziel: Wiederherstellung eines lauffähigen, fehlerfreien Code-Fundaments nach dem abgebrochenen Gemma-Push.
 
-Implement generateCompletion(prompt: string, systemPrompt?: string, options?: ModelConfig) using fetch or Axios.
+- [ ] **Codebase-Diff-Analyse**:
+  - Vergleich von Commit `a37859b6278978c830019ad32aa3a85513169744` mit dem `main`-Branch.
+  - Identifikation aller nicht fertiggestellten Methoden, Typ-Fehler (TypeScript) und Platzhalter.
+- [ ] **Bereinigung & Typ-Reparatur**:
+  - Behebung von Syntax- und Transpilierungsfehlern (`npm run build` / `tsc`).
+  - Bereinigung toted Codes oder unvollständiger Importe.
+- [ ] **Modul-Isolierung**:
+  - Trennung der Kernlogik (Process Spawning, Config Parsing) von der VS Code UI-Logik.
 
-Set sensible default parameters for local small models:
+---
 
-temperature: 0.2 (low deterministic output for structured JSON/Markdown)
+### Phase 1: Lokale Agenten- & Tooling-Stabilisierung (Qwen2.5 / Gemma)
+Ziel: Stabile lokale Entwicklungsumgebung ohne Abbrüche bei KI-gestützter Code-Generierung.
 
-max_tokens: 2048
+- [ ] **Qwen2.5-Coder & Local LLM Debugging**:
+  - Analyse der Fehlerursachen beim lokalen Betrieb von Qwen2.5-Coder (Ollama / LM Studio / vLLM).
+  - Optimierung von Kontextfenster (Context Length), Temperature und System-Prompts für exakten TypeScript-Output.
+- [ ] **Agenten-Workflows**:
+  - Aufteilung großer Implementierungsschritte in atomare, überprüfbare Teilaufgaben (Prompt Chunking).
+  - Einrichtung automatisierter Linting-Checks (`npm run lint`), die vom Agenten nach jedem Schritt ausgeführt werden.
 
-timeout: 30000 (30s timeout guard to prevent GPU deadlocks)
+---
 
-Phase 2: MCP Tool Definition & Registration
-Define and register the LM Studio Loopback tools in the Supergateway MCP tool registry (e.g., src/tools/lmstudioLoopback.ts).
+### Phase 2: Supergateway Process Manager & Core Engine
+Ziel: Robuster Hintergrund-Prozess-Manager zur Ausführung von Supergateway über Node.js `child_process`.
 
-Tools to define:
+- [ ] **Process Lifecycle Handler**:
+  - Starten/Stoppen von Supergateway via `npx -y supergateway` oder lokal installiertem Binärpaket.
+  - Unterstützung der Haupt-Modi:
+    - **stdio → SSE** (`--stdio "command"` `--port <port>`)
+    - **SSE → stdio** (`--sse "https://..."`)
+    - **Streamable HTTP → stdio** (`--streamableHttp "https://..."`)
+    - **stdio → Streamable HTTP / WS** (`--outputTransport streamableHttp|ws`)
+- [ ] **Prozess-Überwachung & Health-Checks**:
+  - Überwachung von stdout/stderr zur Statuserkennung.
+  - Automatischer Restart-Mechanismus bei unerwartetem Prozess-Beenden.
+  - Port-Konflikt-Ermittlung und automatische Zuweisung freier Ports.
+- [ ] **Konfigurations-Parser (`settings.json`)**:
+  - Definition von VS Code Settings (`mcpSupergateway.defaultPort`, `mcpSupergateway.autoStart`, `mcpSupergateway.customEnv`).
 
-lmstudio_complete
+---
 
-Parameters: prompt (string), system_prompt (optional string)
+### Phase 3: VS Code UI & UI Ergonomie
+Ziel: Intuitive visuelle Interaktion in VS Code.
 
-Description: Executes a raw completion on the active local LM Studio model.
+- [ ] **Status Bar Item**:
+  - Anzeige des aktuellen Gateway-Status (z. B. `$(radio-tower) MCP Gateway: Running (Port 8000)`).
+  - Quick-Pick Menü bei Klick: Starten, Stoppen, Logs öffnen, Konfiguration bearbeiten.
+- [ ] **TreeView Explorer in der Sidebar**:
+  - Visualisierung aktiver Gateway-Instanzen.
+  - Anzeige verbundener Clients und MCP-Tools.
+  - Inline-Aktionen: Restart, Pause, Copy Connection URL.
+- [ ] **Dedicated Output Channel**:
+  - Strukturierte Protokollierung aller Gateway-Events im VS Code Output Panel (`MCP Supergateway`).
+  - Syntax-Hervorhebung und Log-Level-Filtering (Debug, Info, Error).
 
-lmstudio_summarize_diff
+---
 
-Parameters: git_diff (string), target_format (enum)
+### Phase 4: Fortgeschrittene Features & Tunneling
+Ziel: Unterstützung professioneller Entwicklungs-Szenarien und erweiterter Modus-Abdeckungen.
 
-Description: Parses a Git diff and returns a concise summary or ADR entry.
+- [ ] **Authentifizierung & Header-Verwaltung**:
+  - Unterstützung für Bearer-Tokens (`--oauth2Bearer`) und benutzerdefinierte Header (`--header`).
+  - Sichere Speicherung sensibler Tokens im VS Code `SecretStorage`.
+- [ ] **Tunneling-Integration**:
+  - Nahtlose Anbindung an ngrok oder Tailscale zur Veröffentlichung lokaler Stdio-MCP-Server für Remote-Clients.
+- [ ] **Integrationstests mit KI-Clients**:
+  - Verifizierung der Funktionalität mit Claude Desktop, Cursor, Cline, Roo Code und lokalen MCP Inspector-Tools.
 
-lmstudio_update_vault_task
+---
 
-Parameters: task_id (string), status (string), summary (string)
+### Phase 5: Tests, Dokumentation & Release
+Ziel: Hohe Softwarequalität und einfache Benutzung.
 
-Description: Generates updated YAML frontmatter and task markdown content.
+- [ ] **Testabdeckung**:
+  - Unit-Tests für Process-Manager und Config-Parsing (Vitest / Mocha).
+  - End-to-End Extension Host Tests.
+- [ ] **Dokumentation & Anleitungen**:
+  - Erstellung einer umfassenden `README.md` mit Code-Beispielen und Setup-Guides für lokale KI-Modelle (Qwen2.5-Coder / Gemma).
+  - Erstellung eines `CONTRIBUTING.md` Guides.
+- [ ] **Packaging & Marketplace Preparation**:
+  - Erstellung des `.vsix` Package (`vsce package`).
+  - Vorbereitung für die Veröffentlichung im Visual Studio Marketplace / Open VSX.
 
-Phase 3: Error Handling & Fallbacks
-Robustness is critical to avoid hanging the VS Code client when local GPU resources are constrained.
+---
 
-Timeout Protection: Wrap all LM Studio calls in a Promise.race with an explicit timeout handler.
+## 4. Sofortige Nächste Schritte (Action Items)
 
-Graceful Degradation: If LM Studio is not running or fails to respond, return a clean MCP error payload (e.g., "LM Studio server unavailable at http://localhost:1234") rather than crashing the gateway process.
-
-Input Truncation: Automatically truncate incoming prompts exceeding 8,000 tokens to preserve local VRAM stability.
-
-Phase 4: Gateway Routing Integration
-Register the new toolset in the primary Supergateway server initialization file (src/index.ts or src/server.ts).
-
-Example integration:
-import { registerLMStudioTools } from "./tools/lmstudioLoopback";
-registerLMStudioTools(mcpServer);
-
-4. Code Specifications for AI Agent Implementation
-When generating the TypeScript code for these modules, follow these standard guidelines:
-
-Use strict TypeScript types (no any).
-
-Use Zod schemas for MCP tool input validation.
-
-Keep async/await flows clean with try/catch blocks returning structured MCP content responses:
-return { content: [{ type: "text", text: resultText }] };
-
-5. Definition of Done (Validation Checklist)
-[ ] Gateway boots without errors when LM Studio is offline.
-
-[ ] lmstudio_complete successfully receives prompt and returns output from Qwen 2.5 Coder.
-
-[ ] Timeouts trigger gracefully after 30 seconds if the model hangs.
-
-[ ] Tool declarations appear correctly in the VS Code / Copilot MCP registry.
+1. **Arbeitsbereich aufräumen**: `git status` und `git diff HEAD~1` ausführen, um alle Änderungen des Gemma-Commits zu inventarisieren.
+2. **Build verifizieren**: `npm run build` bzw. `nsc` ausführen, um alle TypeScript-Typfehler des abgebrochenen Stands sichtbar zu machen.
+3. **Task 0.1 abschließen**: Den Prozess-Manager refaktoren und sicherstellen, dass `supergateway` sauber als Kindprozess gestartet werden kann.
+4. **Qwen2.5 / Gemma Setup validieren**: Ein einfaches Test-Skript ausführen, um die lokale Model-Antwort und Kontext-Stabilität sicherzustellen.
