@@ -1,0 +1,19 @@
+{
+  "name": "vscode-mcp-supergateway",
+  "version": "1.0.0",
+  "description": "MCP Supergateway for LM Studio and other tools",
+  "main": "src/server.ts",
+  "types": "src/server.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
