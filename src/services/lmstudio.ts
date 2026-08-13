@@ -25,7 +25,7 @@ export class LMStudioClient {
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.statusText}`);
       }
-      const data = await response.json();
+      const data = (await response.json()) as any;
       const models = data.data || [];
       if (models.length > 0) {
         return models[0].id;
@@ -49,6 +49,8 @@ export class LMStudioClient {
       system_prompt = ''
     } = options;
 
+    const truncatedPrompt = this.truncatePrompt(prompt);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -62,7 +64,7 @@ export class LMStudioClient {
           model: 'local-model',
           messages: [
             { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt }
+            { role: 'user', content: truncatedPrompt }
           ],
           temperature,
           max_tokens,
@@ -74,7 +76,7 @@ export class LMStudioClient {
         throw new Error(`LM Studio API error: ${response.statusText}`);
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as any;
       return data.choices[0].message.content;
     } catch (error: any) {
       if (error.name === 'AbortError') {
@@ -84,6 +86,17 @@ export class LMStudioClient {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private truncatePrompt(prompt: string): string {
+    const MAX_TOKENS = 8000;
+    // Simple heuristic: 1 token approx 4 characters.
+    // We want to stay well under 8000 tokens.
+    const MAX_CHARS = MAX_TOKENS * 3; 
+    if (prompt.length <= MAX_CHARS) {
+      return prompt;
+    }
+    return prompt.substring(0, MAX_CHARS) + '... [Truncated]';
   }
 }
 
