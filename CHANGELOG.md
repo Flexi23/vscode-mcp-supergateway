@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [2.0.0] - 2026-08-13
+### Removed
+- **Breaking:** the `dist/cli.js` CLI wrapper (`up`/`down`) and its `supergateway` bin entry. The workspace `.vscode/tasks.json` now calls `docker compose up -d --build` / `docker compose down` directly (matching the house style already used for other Docker tasks there), so the wrapper added indirection without value for that consumer. Anyone still using `npm run cli -- up/down` or the global `supergateway` bin should switch to `docker compose up -d --build` / `docker compose down` from the repo root.
+- **Breaking:** the host-side scripting path — `vscode/supergateway.ps1`, `vscode/supergateway.js`, `vscode/supergateway.config.json`, `vscode/tasks.json`, and the `vscode/data/` log directory. Docker is now the only supported way to run the gateway; there is no scripting outside the container anymore. Upstream wiring lives in `docker/gateway.config.json`, and `.env` replaces the `GITLAB_PAT` process-environment dance (use `GITLAB_PERSONAL_ACCESS_TOKEN` there instead).
+- The committed `dist/` build artifacts. `dist/` was already listed in `.gitignore` but had been tracked since before that rule existed; it is excluded from the Docker build context via `.dockerignore` and rebuilt inside the image by `RUN npm run build`, so a host-side copy served no purpose.
+- Dead `package.json` entries: the `start` script (nothing invokes it — the Dockerfile uses `CMD ["node", "dist/server.js"]` and Compose sets explicit `command:` values) and the `types` field, which pointed at a `dist/server.d.ts` that was never emitted because `tsconfig.json` does not enable `declaration`.
+- `task.allowAutomaticTasks` from `vscode/settings.json`, which only existed for the removed `vscode/tasks.json`.
+
+### Changed
+- `README.md` restructured for a linear onboarding path: Docker-only Quick Start (clone → `.env` → `docker compose up -d --build` → connect VS Code), followed by Services & Ports, Configured Upstreams, Key Features, Operations, and a separate "Developing on this repo" section for source builds.
+- The architecture Mermaid diagram now draws the Docker Compose boundary explicitly, showing which components are containerized (gateway + all four upstreams, backend) versus host-side (VS Code/Copilot, LM Studio).
+- `AGENT_INSTRUCTIONS.md` environment-variable section reduced to the Docker path only.
+
+### Added
+- Full Docker packaging: `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example`, and `docker/gateway.config.json`. One image bundles Node.js, Python, and all four upstream MCP servers (`codebase-memory`, `markdown-vault`, `gitlab`, `markitdown`), so the host needs nothing but Docker.
+- `markitdown` upstream, exposing `convert_to_markdown(uri)` for documents, Office files, and PDFs.
+
+### Docs
+- Added a disclaimer to `README.md` noting that parts of this repository
+  were generated with alternating small local LLMs.
+
 ## [1.0.0] - 2026-08-12
 ### Added
 - Initial project setup and directory structure.
