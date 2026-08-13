@@ -1,25 +1,67 @@
-You are an expert in TypeScript, VS Code Extension development, and the Model Context Protocol (MCP).
+# Development Plan: vscode-mcp-supergateway
 
-**Your current project:** `vscode-mcp-supergateway`.
-We are currently implementing **Phase 3: Vault-Integration & Task-Automatisierung (Task Automation)**. 
-Phase 1 (LM Studio Loopback & Resilience Layer) and Phase 2 (Process Manager) have been successfully completed. The MCP tools (such as `lmstudio_update_vault_task`) are defined via Zod schemas in `src/tools/lmstudioLoopback.ts` and their foundational structure is in place.
+## 1. Project Overview & Current Status
 
-**Your Mission:** 
-Implement Phase 3 autonomously. This involves two main components:
+### Project Goal
+vscode-mcp-supergateway is a Visual Studio Code Extension and a central Model Context Protocol (MCP) Gateway Hub. The project's purpose is to efficiently orchestrate, route, and offload context between IDE clients (VS Code, Copilot, Cursor), local LLM workers (LM Studio, Ollama), and remote as well as local MCP servers.
 
-1. **Contract Management (`vault/meta/contract.md`) Integration:**
-   - Develop the TypeScript logic to automatically read and parse the meta-information from `vault/meta/contract.md`.
-   - Ensure that the Loopback-Worker understands this "contract" and can write updates to it when necessary (e.g., after completing a task), which is required for the automatic context routing of the gateway.
+### Current Status (Update)
+- **LM Studio Client & Resilience (Completed):** 30-second timeout guard via `AbortController` and prompt truncation (heuristic: 8000 tokens) implemented. Zod schema validation for tools is active.
+- **Process Management (Completed):** Migration from PowerShell (`supergateway.ps1`) to a native Node.js Process Manager (`src/processManager.ts`) successful. Dynamic config loading and lifecycle management integrated.
+- **Knowledge Vault & Task System (In Progress):** Vault contract (`contract.md`) and sub-agent task templates (`mcp-loopback.md`) exist. Read/write routines still need to be implemented.
 
-2. **Task Execution Engine (Task Loopback Workflow):**
-   - Develop the workflow to process structured tasks from `templates/mcp-loopback.md`.
-   - The local worker LLM should read these Markdown tasks, execute them, and document the results.
-   - You must use the MCP Tool `lmstudio_update_vault_task` that was prepared in Phase 1. This tool needs to be invoked to cleanly update the YAML frontmatter (e.g., status updates) and the Markdown content of the respective task files in the vault.
+## 2. Phase Roadmap
 
-**Code Requirements:**
-- Strictly adhere to TypeScript (no implicit `any`).
-- Use the `fs/promises` module for all file operations.
-- Handle errors robustly (Graceful Degradation): If a file does not exist or is malformed, the gateway must not crash. Instead, cleanly log the error or append it to the task.
-- The new code must fit into the existing architecture (`src/`). Write the necessary new modules (e.g., `src/services/vaultManager.ts` or extend existing ones) and briefly explain how they hook into the `server.ts` lifecycle.
+[Phase 0: Gemma Cleanup & Codebase Audit] -> DONE
+│
+▼
+[Phase 1: LM Studio Loopback & Resilience Layer] -> DONE
+│
+▼
+[Phase 2: Node.js Process Manager & Core Engine] -> DONE
+│
+▼
+[Phase 3: Vault Integration & Loopback Workflows] -> IN PROGRESS
+│
+▼
+[Phase 4: VS Code Extension UI & Status Bar Integration] -> PENDING
+│
+▼
+[Phase 5: Automated Testing, Documentation & Marketplace Release] -> PENDING
 
-Please start with a brief analysis of the provided files in your context and then generate the complete code to satisfy Phase 3.
+## 3. Detailed Work Packages
+
+### Phase 0 to 2: Completed
+- Foundations laid, LM Studio Loopback implemented (including `lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`). Process Manager implemented in Node.js.
+
+### Phase 3: Vault Integration & Loopback Workflows (Current Focus)
+- **Contract Management (`vault/meta/contract.md`):**
+  - Integration of read and write routines for the Vault contract to enable automatic context routing.
+  - Development of a `VaultManager` service.
+- **Task Execution Engine:**
+  - Processing of structured tasks from `templates/mcp-loopback.md` by the local worker LLM.
+  - Automatic updating of YAML frontmatter via `lmstudio_update_vault_task`.
+
+### Phase 4: VS Code Extension UI
+- **Status Bar Integration:**
+  - Status display (e.g., `$(radio-tower) Supergateway: Active (8080)`) with quick-pick actions for Start, Stop, Logs, and Config.
+- **Dedicated Output Channel:**
+  - Logging of all gateway and subprocess events in the VS Code panel with configurable log levels.
+
+### Phase 5: Automated Testing, Documentation & Release
+- **Test Coverage:** Unit tests for Process Manager and LM Studio REST Client, integration tests via MCP Inspector.
+- **Documentation & Packaging:** README.md updates, `.vsix` generation.
+
+## 4. Component Status Matrix
+
+| Component | Path / File | Status |
+| :--- | :--- | :--- |
+| LM Studio Client | `src/services/lmstudio.ts` | **Done** |
+| MCP Tool Registry | `src/tools/lmstudioLoopback.ts` | **Done** |
+| Gateway Server Engine | `src/server.ts` | **Done** |
+| Process Manager Module| `src/processManager.ts` | **Done** |
+| Knowledge Vault | `vault/meta/contract.md` | **In Progress** (Schema defined, engine missing) |
+
+## 5. Immediate Next Steps
+1. Implementation of the Vault read/write routines in a new TypeScript module (e.g., `src/services/vaultManager.ts`).
+2. Creation of the workflow to parse and execute the tasks from `templates/mcp-loopback.md` via the local LM Studio worker.
