@@ -2,9 +2,9 @@ import { lmstudioClient } from '../services/lmstudio';
 import { z } from 'zod';
 import fs from 'fs';
 import { execSync } from 'child_process';
-import { VaultService } from '../services/vaultService';
+import { VaultManager } from '../services/vaultManager';
 
-export const registerLMStudioTools = (registerTool: (tool: any) => void, vaultService: VaultService) => {
+export const registerLMStudioTools = (registerTool: (tool: any) => void, vaultManager: VaultManager) => {
   
   // 1. lmstudio_complete
   const lmstudioCompleteSchema = z.object({
@@ -79,7 +79,7 @@ export const registerLMStudioTools = (registerTool: (tool: any) => void, vaultSe
     execute: async (args: any) => {
       try {
         const validatedArgs = lmstudioUpdateVaultTaskSchema.parse(args);
-        vaultService.writeNote(validatedArgs.task_path, validatedArgs.content);
+        vaultManager.writeNote(validatedArgs.task_path, validatedArgs.content);
         return { content: `Successfully updated ${validatedArgs.task_path}` };
       } catch (e: any) {
         return { content: `Error updating vault task: ${e.message}` };

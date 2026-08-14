@@ -1,6 +1,6 @@
 import express from 'express';
 import { registerLMStudioTools } from './tools/lmstudioLoopback';
-import { VaultService } from './services/vaultService';
+import { VaultManager } from './services/vaultManager';
 
 const mcpServer = {
   registerTool: (tool: any) => {
@@ -11,11 +11,12 @@ const mcpServer = {
 const app = express();
 app.use(express.json());
 
-const vaultService = new VaultService();
+const vaultManager = new VaultManager();
 
 // Register tools
-registerLMStudioTools(mcpServer.registerTool, vaultService);
+registerLMStudioTools(mcpServer.registerTool, vaultManager);
 
-app.listen(8080, () => {
-  console.log('MCP Supergateway server running on port 8080');
+const port = Number(process.env.PORT || 8080);
+app.listen(port, () => {
+  console.log(`MCP Supergateway server running on port ${port}`);
 });

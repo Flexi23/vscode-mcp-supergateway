@@ -8,7 +8,8 @@ export interface ModelConfig {
 }
 
 export class LMStudioClient {
-  private readonly baseUrl: string = 'http://localhost:1234/v1';
+  // overridable so the backend can reach a host-side LM Studio instance when containerized
+  private readonly baseUrl: string = process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1';
 
   async isServerAvailable(): Promise<boolean> {
     try {
