@@ -204,4 +204,4 @@ MIT License. Feel free to contribute or adapt!
 
 ## 🧪 Disclaimer
 
-Parts of this repository were deliberately generated with small local LLMs rather than a single frontier model — quality and style vary accordingly between commits. See individual commit messages for which model produced each change.
+Parts of this repository were deliberately generated with small local LLMs rather than a single frontier model — quality and style vary accordingly between commits. This includes the preserved original prototype created by Gemma 4 12B, which was saved on its own branch before the Docker refactor and later merged back into `main` for provenance. See individual commit messages for which model produced each change.
