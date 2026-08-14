@@ -30,3 +30,12 @@ When a user requests a task:
 *   **Commit Discipline:** Git commits must **NEVER** be created unless explicitly confirmed or requested by me (the user). This is a critical, non-negotiable constraint on process execution.
 *   **Documentation Aesthetics:** All generated documentation *must* be visually engaging and professional. Utilize markdown features such as emojis (`✨`, `🚀`), embed diagrams using Mermaid syntax (`graph TD;...`), and ensure all internal references to file paths are fully navigable/hyperlinked for convenience.
 *   **Commit History:** Ensure that all commits are descriptive and adhere strictly to the versioning specified in \`CHANGELOG.md\` when pushing changes.
+
+## Environment Variables
+
+Everything runs in Docker (`docker compose up -d --build`, see README.md "🐳 Operations"). There is no host-side scripting path anymore.
+
+*   **`GITLAB_PERSONAL_ACCESS_TOKEN`**: set in `.env` (copy from `.env.example`). Read by `src/gateway.ts` and injected into the `gitlab` upstream's env before the admin config is written. Without it the gitlab upstream fails to connect and its tools are silently omitted from the admin UI at `http://localhost:3100/admin`.
+*   **`LMSTUDIO_BASE_URL`**: defaults to `http://host.docker.internal:1234/v1`. A hardcoded `localhost` would resolve to the container itself, not the host-side LM Studio.
+*   **Vault directory:** the `markdown-vault` upstream's vault lives in the named volume `gateway-vault` and is created on start if missing — no manual setup required.
+*   `@mspstack/mcp-gateway` requires Node ≥24 — do not downgrade the Dockerfile's base images to `node:20`.

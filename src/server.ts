@@ -16,6 +16,7 @@ const vaultManager = new VaultManager();
 // Register tools
 registerLMStudioTools(mcpServer.registerTool, vaultManager);
 
-app.listen(8080, () => {
-  console.log('MCP Supergateway server running on port 8080');
+const port = Number(process.env.PORT || 8080);
+app.listen(port, () => {
+  console.log(`MCP Supergateway server running on port ${port}`);
 });

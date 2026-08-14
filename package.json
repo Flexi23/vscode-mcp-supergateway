@@ -1,25 +1,23 @@
 {
   "name": "vscode-mcp-supergateway",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "MCP Supergateway for LM Studio and other tools",
   "main": "dist/server.js",
-  "types": "dist/server.d.ts",
-  "bin": {
-    "supergateway": "dist/cli.js"
-  },
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/server.js",
-    "cli": "node dist/cli.js"
+    "build": "tsc"
   },
   "dependencies": {
+    "@mspstack/mcp-gateway": "^0.12.0",
+    "@wirux/mcp-markdown-vault": "^2.3.0",
+    "@zereight/mcp-gitlab": "^2.1.46",
+    "codebase-memory-mcp": "^0.10.3",
+    "express": "^5.2.1",
     "node-fetch": "^3.0.0",
     "zod": "^3.22.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^20.0.0",
-    "express": "^5.2.1",
     "typescript": "^5.0.0"
   }
 }

@@ -1,0 +1,14 @@
+node_modules
+dist
+vault
+.git
+.gitignore
+vscode/data
+*.log
+npm-debug.log*
+README.md
+CHANGELOG.md
+plan.md
+templates
+AGENT_INSTRUCTIONS.md
+.env

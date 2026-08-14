@@ -1,0 +1,35 @@
+{
+  "upstreams": [
+    {
+      "id": "codebase-memory",
+      "namespace": "codebasememory",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "codebase-memory-mcp"]
+    },
+    {
+      "id": "markdown-vault",
+      "namespace": "markdownvault",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@wirux/mcp-markdown-vault"]
+    },
+    {
+      "id": "gitlab",
+      "namespace": "gitlab",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@zereight/mcp-gitlab"],
+      "env": {
+        "GITLAB_API_URL": "https://gitlab.uni-rostock.de/api/v4"
+      }
+    },
+    {
+      "id": "markitdown",
+      "namespace": "markitdown",
+      "transport": "stdio",
+      "command": "markitdown-mcp",
+      "args": []
+    }
+  ]
+}
