@@ -118,6 +118,12 @@ Both services are built from the same image (`vscode-mcp-supergateway-backend:lo
 | `gateway` | `node dist/gateway.js` | `8080` public, `3100` admin UI + direct MCP endpoint | The full multi-upstream MCP gateway (`@mspstack/mcp-gateway` plus all four upstreams below), everything bundled in the image. |
 | `backend` | `node dist/server.js` | `8081` | The Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`). Deliberately on a *different* port than `gateway` — `8080` is the port your MCP client connects to, so squatting it here would silently break that connection. |
 
+### What is `@mspstack/mcp-gateway`?
+
+[`@mspstack/mcp-gateway`](https://www.npmjs.com/package/@mspstack/mcp-gateway) ("MSPStack Gateway", MIT-licensed, by [Eugene Samotija](https://github.com/selic)) is a third-party, self-hosted MCP aggregator: it federates any number of MCP servers (stdio or HTTP) behind one endpoint with namespaced tools, and normally adds OAuth 2.1 / static-token auth, role-based tool access, and secret-store integration (OpenBao, Azure Key Vault) on top — built for MSPs running many client-facing MCP servers.
+
+`src/gateway.ts` spawns it via `npx -y @mspstack/mcp-gateway --port <admin-port> --config <admin-config> --db-path <db>` and sets `DEV_ALLOW_UNAUTHENTICATED=true`, which puts it in its documented localhost-only, no-auth mode — we only use its core aggregation feature (one MCP endpoint for our four stdio upstreams), none of the OAuth/RBAC/secret-store machinery. `DEV_ALLOW_UNAUTHENTICATED=true` must **never** be used on anything but `127.0.0.1`/localhost; the package itself refuses to start without it or a real auth method configured. Requires Node ≥24 (uses the built-in `node:sqlite`, no native dependencies) — see the Node version note below.
+
 ---
 
 ## 🔌 Configured Upstreams

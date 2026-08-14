@@ -33,9 +33,9 @@ When a user requests a task:
 
 ## Environment Variables
 
-Everything runs in Docker (`docker compose up -d --build`, see README.md "🐳 Operations"). There is no host-side scripting path anymore.
-
-*   **`GITLAB_PERSONAL_ACCESS_TOKEN`**: set in `.env` (copy from `.env.example`). Read by `src/gateway.ts` and injected into the `gitlab` upstream's env before the admin config is written. Without it the gitlab upstream fails to connect and its tools are silently omitted from the admin UI at `http://localhost:3100/admin`.
-*   **`LMSTUDIO_BASE_URL`**: defaults to `http://host.docker.internal:1234/v1`. A hardcoded `localhost` would resolve to the container itself, not the host-side LM Studio.
-*   **Vault directory:** the `markdown-vault` upstream's vault lives in the named volume `gateway-vault` and is created on start if missing — no manual setup required.
+### Docker path (the only supported runtime — `docker compose up`, see README.md "🐳 Docker")
+*   **`GITLAB_PERSONAL_ACCESS_TOKEN`**: set in `.env` (copy from `.env.example`). Read by `src/gateway.ts` and injected into the `gitlab` upstream's env before the admin config is written.
+*   The `gateway` service runs [`@mspstack/mcp-gateway`](https://www.npmjs.com/package/@mspstack/mcp-gateway) ("MSPStack Gateway") — a third-party MCP aggregator that normally also does OAuth/RBAC/secret-store management. We only use its core "one endpoint, many MCP servers" feature, started with `DEV_ALLOW_UNAUTHENTICATED=true` (localhost-dev only — the package refuses to start without that flag or a real auth method). See README.md "What is `@mspstack/mcp-gateway`?" for details.
 *   `@mspstack/mcp-gateway` requires Node ≥24 — do not downgrade the Dockerfile's base images to `node:20`.
+*   There is no host-side script anymore (`vscode/supergateway.ps1` was removed in v2.0.0, "make Docker the only runtime, drop host scripting and CLI"). Don't reference it in new docs or tasks.
+*   **Vault directory:** `docker/gateway.config.json` configures the `markdown-vault` upstream; `src/gateway.ts` creates the vault directory automatically on container start if missing, backed by the `gateway-vault` named volume (see `docker-compose.yml`) — no manual setup required.

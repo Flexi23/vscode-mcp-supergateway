@@ -70,9 +70,9 @@ export class VaultManager {
     for (const line of lines) {
       const [key, ...valueParts] = line.split(':');
       if (key && valueParts.length > 0) {
-        let value = valueParts.join(':').trim();
+        let value: any = valueParts.join(':').trim();
         if (value.startsWith('[') && value.endsWith(']')) {
-          value = value.slice(1, -1).split(',').map(v => v.trim().replace(/^['"]|['"]$/g, ''));
+          value = value.slice(1, -1).split(',').map((v: string) => v.trim().replace(/^['"]|['"]$/g, ''));
         } else if (value === 'true') value = true;
         else if (value === 'false') value = false;
         else if (value === 'null') value = null;
@@ -124,9 +124,9 @@ export class VaultManager {
     for (const line of lines) {
       const [key, ...valueParts] = line.split(':');
       if (key && valueParts.length > 0) {
-        let value = valueParts.join(':').trim();
+        let value: any = valueParts.join(':').trim();
         if (value.startsWith('[') && value.endsWith(']')) {
-          value = value.slice(1, -1).split(',').map(v => v.trim().replace(/^['"]|['"]$/g, ''));
+          value = value.slice(1, -1).split(',').map((v: string) => v.trim().replace(/^['"]|['"]$/g, ''));
         } else if (value === 'true') value = true;
         else if (value === 'false') value = false;
         else if (value === 'null') value = null;
