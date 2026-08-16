@@ -30,13 +30,13 @@ graph LR
         end
 
         subgraph Docker["🐳 Docker Compose"]
-            Supergateway["Supergateway MCP Server<br/>(admin UI :3100)"]
+            Supergateway["Supergateway MCP Server"]
 
             Loopback@{ shape: subproc, label: "Agent Tasks<br/>(loopback API :8081)" }
-            Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate" }
+            Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
             MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
-            MarkdownVault["Markdown Vault MCP<br/>(tasks, ADRs & specs)"]
+            SiYuanNote["SiYuan Note MCP<br/>(notebooks, docs & blocks)"]
             CodebaseMemory["Codebase Memory MCP<br>(3D graph/admin UI :9749)"]
             GitLab["GitLab MCP"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
@@ -45,7 +45,7 @@ graph LR
 
     Supergateway --> |forward proxy| Proxy
     Supergateway --> |scheduler| Loopback
-    Loopback <-. reads & updates .-> MarkdownVault
+    Loopback <-. reads & updates .-> VaultFiles@{ shape: cyl, label: "Vault files<br/>(internal, /app/vault)" }
     Supergateway --> |provider|MCP
 
     MCP --> Copilot
@@ -63,13 +63,13 @@ graph LR
     Proxy --> CodebaseMemory
     Proxy --> GitLab
     Proxy --> MarkItDown
-    Proxy --> MarkdownVault
+    Proxy --> SiYuanNote
 
     click Supergateway "blob/main/src/gateway.ts" "Entry point: src/gateway.ts (main())"
     click Loopback "blob/main/src/server.ts" "Entry point: src/server.ts (startBackendServer)"
     click Proxy href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway" _blank
     click MCP href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway (RBAC & tool access)" _blank
-    click MarkdownVault href "https://www.npmjs.com/package/@wirux/mcp-markdown-vault" "npm: @wirux/mcp-markdown-vault" _blank
+    click SiYuanNote href "https://www.npmjs.com/package/siyuan-mcp" "npm: siyuan-mcp" _blank
     click CodebaseMemory href "https://www.npmjs.com/package/codebase-memory-mcp" "npm: codebase-memory-mcp" _blank
     click GitLab href "https://www.npmjs.com/package/@zereight/mcp-gitlab" "npm: @zereight/mcp-gitlab" _blank
     click MarkItDown href "https://pypi.org/project/markitdown-mcp/" "PyPI: markitdown-mcp" _blank
@@ -81,8 +81,8 @@ graph LR
     classDef hostApp fill:#e5e7eb,stroke:#4b5563,stroke-width:1px,color:#111827;
 
     class Supergateway,Loopback entryPoint;
-    class Proxy,MCP,MarkdownVault,CodebaseMemory,GitLab,MarkItDown thirdParty;
-    class Copilot,LMStudioServer,LMStudioUI,LocalAgents hostApp;
+    class Proxy,MCP,SiYuanNote,CodebaseMemory,GitLab,MarkItDown thirdParty;
+    class Copilot,LMStudioServer,LMStudioUI,LocalAgents,VaultFiles hostApp;
 
     style Host fill:#f8fafc,stroke:#64748b,stroke-width:1px
     style LMStudio fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px,stroke-dasharray: 3 3
@@ -114,6 +114,8 @@ Then edit [`.env`](.env.example):
 | Variable | Required | Purpose |
 |---|---|---|
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
+| `SIYUAN_TOKEN` | for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token) for the `siyuan` Compose service. Without it the upstream can't authenticate against the SiYuan kernel. |
+| `SIYUAN_ACCESS_AUTH_CODE` | recommended for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); leave unset only for trusted local-only use. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
 
 ### 3. Start
@@ -161,7 +163,7 @@ The admin UI lives at <http://localhost:3100/admin>.
 | `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`), started in-process via `startBackendServer()`. |
 | `9749` | `codebase-memory-mcp`'s own 3D graph-visualization UI (<http://localhost:9749>). Its coordination daemon only binds `127.0.0.1` and rejects cross-origin browser requests, so `gateway.ts` enables it via `CBM_CACHE_DIR/config.json` and reverse-proxies the published port to it, rewriting `Origin`/`Referer` to satisfy its same-origin check; override the port with `CBM_UI_PORT`. |
 
-Both halves share the same `VAULT_PATH` (`/app/vault`), so the loopback tools and the `markdown-vault` upstream read/write the same files.
+The internal LM Studio loopback tools (`lmstudio_update_vault_task`) keep using `VAULT_PATH` (`/app/vault`) directly via `VaultManager` — that vault is no longer exposed as its own MCP upstream (see [Configured Upstreams](#-configured-upstreams)).
 
 ### What is `@mspstack/mcp-gateway`?
 
@@ -178,19 +180,19 @@ All four run inside the `gateway` container; the runtime column only says which 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
 | `codebase-memory` | `codebase-memory-mcp` | Node | Auto-index off by default; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
-| `markdown-vault` | `@wirux/mcp-markdown-vault` | Node | `VAULT_PATH` env var; vault directory is auto-created on start if missing. |
+| `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
 
-Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json).
+Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json). The `siyuan` service itself (image `b3log/siyuan`) is defined in [`docker-compose.yml`](docker-compose.yml) and also publishes its own web UI at <http://localhost:6806>; set `SIYUAN_ACCESS_AUTH_CODE` in `.env` to lock it down.
 
 ---
 
 ## ⚡ Key Features & Concepts
 
-- **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, Vault, MarkItDown).
+- **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
-- **Markdown Vault Integration:** Structure project tasks, architectural decision records (ADRs), and feature specs directly in markdown files guarded by YAML access controls (`agent_access`).
+- **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 
 ---

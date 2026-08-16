@@ -8,11 +8,15 @@
       "args": ["-y", "codebase-memory-mcp"]
     },
     {
-      "id": "markdown-vault",
-      "namespace": "markdownvault",
+      "id": "siyuan-note",
+      "namespace": "siyuannote",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@wirux/mcp-markdown-vault"]
+      "args": ["-y", "siyuan-mcp@latest"],
+      "env": {
+        "SIYUAN_HOST": "siyuan",
+        "SIYUAN_PORT": "6806"
+      }
     },
     {
       "id": "gitlab",

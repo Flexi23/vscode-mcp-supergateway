@@ -13,11 +13,24 @@ services:
       LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
       BACKEND_PORT: "8081"
       CBM_UI_PORT: "9749"
+      SIYUAN_TOKEN: ${SIYUAN_TOKEN}
     volumes:
       - gateway-vault:/app/vault
       - gateway-data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - siyuan
+
+  siyuan:
+    image: b3log/siyuan
+    command: ["serve", "--workspace=/siyuan/workspace/", "--accessAuthCode=${SIYUAN_ACCESS_AUTH_CODE}"]
+    ports:
+      - "6806:6806"
+    volumes:
+      - siyuan-workspace:/siyuan/workspace
     restart: unless-stopped
 
 volumes:
   gateway-vault:
   gateway-data:
+  siyuan-workspace:

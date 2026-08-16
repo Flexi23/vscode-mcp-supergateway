@@ -40,8 +40,8 @@ function buildAdminConfig(): GatewayConfig {
     if (upstream.id === 'gitlab' && process.env.GITLAB_PERSONAL_ACCESS_TOKEN) {
       upstream.env = { ...upstream.env, GITLAB_PERSONAL_ACCESS_TOKEN: process.env.GITLAB_PERSONAL_ACCESS_TOKEN };
     }
-    if (upstream.id === 'markdown-vault') {
-      upstream.env = { ...upstream.env, VAULT_PATH: vaultDir };
+    if (upstream.id === 'siyuan-note' && process.env.SIYUAN_TOKEN) {
+      upstream.env = { ...upstream.env, SIYUAN_TOKEN: process.env.SIYUAN_TOKEN };
     }
     if (upstream.id === 'codebase-memory') {
       upstream.env = { ...upstream.env, CBM_CACHE_DIR: cbmCacheDir };

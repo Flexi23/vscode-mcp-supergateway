@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- **Breaking:** the aggregated `markdown-vault` upstream (`@wirux/mcp-markdown-vault`) is replaced by a `siyuan-note` upstream (`siyuan-mcp`), talking over REST to a new `siyuan` Docker Compose service (image `b3log/siyuan`, port `6806`). `docker/gateway.config.json` and `src/gateway.ts`'s `buildAdminConfig()` inject `SIYUAN_HOST`/`SIYUAN_PORT`/`SIYUAN_TOKEN` instead of `VAULT_PATH` for that upstream. `.env.example` gained `SIYUAN_TOKEN` and `SIYUAN_ACCESS_AUTH_CODE` placeholders. The internal LM Studio task loopback (`VaultManager`, `lmstudio_update_vault_task`) is unaffected — it keeps reading/writing `/app/vault` directly and is no longer exposed as its own MCP upstream. `README.md` architecture diagram/tables updated accordingly.
 
 ## [2.1.0] - 2026-08-16
 ### Added

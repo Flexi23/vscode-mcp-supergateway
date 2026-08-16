@@ -8,11 +8,11 @@
   },
   "dependencies": {
     "@mspstack/mcp-gateway": "^0.12.0",
-    "@wirux/mcp-markdown-vault": "^2.3.0",
     "@zereight/mcp-gitlab": "^2.1.46",
     "codebase-memory-mcp": "^0.10.3",
     "express": "^5.2.1",
     "node-fetch": "^3.0.0",
+    "siyuan-mcp": "^1.1.1",
     "zod": "^3.22.0"
   },
   "devDependencies": {

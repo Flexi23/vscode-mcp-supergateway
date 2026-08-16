@@ -5,7 +5,7 @@ export class VaultManager {
   private readonly vaultRoot: string;
 
   constructor(vaultPath?: string) {
-    // Shares VAULT_PATH with the markdown-vault upstream so both see the same files.
+    // Internal file store for the LM Studio task loopback; no longer exposed as its own MCP upstream.
     this.vaultRoot = path.resolve(vaultPath ?? process.env.VAULT_PATH ?? path.resolve(__dirname, '../../vault'));
   }
 
