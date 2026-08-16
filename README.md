@@ -36,7 +36,7 @@ graph LR
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
             MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
-            SiYuanNote["SiYuan Note MCP<br/>(notebooks, docs & blocks)"]
+            SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
             CodebaseMemory["Codebase Memory MCP<br>(3D graph/admin UI :9749)"]
             GitLab["GitLab MCP"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
@@ -116,7 +116,7 @@ Then edit [`.env`](.env.example):
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
 | `SIYUAN_TOKEN` | for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token) for the `siyuan` Compose service. Without it the upstream can't authenticate against the SiYuan kernel. |
 | `SIYUAN_ACCESS_AUTH_CODE` | **required** for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start without it (or `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true`). |
-| `SIYUAN_WORKSPACE_DIR` | for the `siyuan` service | Host directory bind-mounted as the SiYuan workspace (notebooks/docs/assets persist there). Relative paths resolve against the repo root. |
+| `WORKSPACE_ROOT` | **required** | Absolute host path to the workspace root. The SiYuan workspace dir (`${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace`) and the `codebase-memory` auto-index target (bind-mounted read-only at `/workspace` in the `gateway` container) are both derived from this single variable. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
 
 ### 3. Start
@@ -180,7 +180,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-index off by default; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes `WORKSPACE_ROOT` (bind-mounted read-only at `/workspace`) on container startup via `CBM_AUTO_INDEX_PATH` (see [`src/gateway.ts`](src/gateway.ts)); own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
@@ -207,7 +207,7 @@ docker compose down            # stop and remove
 ```
 
 Notes:
-- **Data persistence:** the gateway DB lives in the `gateway-data` named volume (not a bind mount) — inspect with `docker compose exec gateway sh`. The SiYuan workspace is a host bind mount at `SIYUAN_WORKSPACE_DIR` (see [.env.example](.env.example)), so it's directly inspectable/backupable on the host.
+- **Data persistence:** the gateway DB lives in the `gateway-data` named volume (not a bind mount) — inspect with `docker compose exec gateway sh`. The SiYuan workspace is a host bind mount derived from `WORKSPACE_ROOT` (see [.env.example](.env.example)), so it's directly inspectable/backupable on the host.
 - **Node ≥24 required:** `@mspstack/mcp-gateway` declares it in its `engines` field, so [`Dockerfile`](Dockerfile) uses `node:24-alpine` (builder) / `node:24-bookworm-slim` (runtime). Do not downgrade to `node:20`.
 - **Image size (~2.9 GB):** caused by Python's `markitdown[all]` (onnxruntime, pandas, azure SDKs, ...) plus ~330 Node packages. Accepted trade-off for having zero host-level dependencies.
 

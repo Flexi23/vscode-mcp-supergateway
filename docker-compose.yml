@@ -14,8 +14,11 @@ services:
       BACKEND_PORT: "8081"
       CBM_UI_PORT: "9749"
       SIYUAN_TOKEN: ${SIYUAN_TOKEN}
+      # codebase-memory auto-indexes this mounted path on startup (see gateway.ts).
+      CBM_AUTO_INDEX_PATH: /workspace/root
     volumes:
       - gateway-data:/app/data
+      - ${WORKSPACE_ROOT}:/workspace/root:ro
     restart: unless-stopped
     depends_on:
       - siyuan
@@ -26,7 +29,8 @@ services:
     ports:
       - "6806:6806"
     volumes:
-      - ${SIYUAN_WORKSPACE_DIR}:/siyuan/workspace
+      # Derived from WORKSPACE_ROOT: this repo's own siyuan-workspace/ subfolder.
+      - ${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace:/siyuan/workspace
     restart: unless-stopped
 
 volumes:

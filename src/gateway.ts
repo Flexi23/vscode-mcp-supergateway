@@ -142,6 +142,28 @@ function configureCodebaseMemoryUi(cacheDir: string, port: number) {
   fs.writeFileSync(configPath, JSON.stringify({ ...existing, ui_enabled: true, ui_port: port }, null, 2));
 }
 
+// Auto-indexes CBM_AUTO_INDEX_PATH (the mounted WORKSPACE_ROOT, see docker-compose.yml)
+// on startup, since codebase-memory-mcp otherwise requires a manual "Index this
+// project" tool call per session. Runs detached/non-blocking so a large first
+// index (can take minutes on a big monorepo) doesn't delay the gateway/proxy
+// from coming up.
+function autoIndexCodebaseMemory(cacheDir: string, repoPath: string) {
+  if (!fs.existsSync(repoPath)) {
+    console.warn(`[codebase-memory] auto-index skipped, path not found: ${repoPath}`);
+    return;
+  }
+  console.log(`[codebase-memory] auto-indexing ${repoPath} in background...`);
+  const child = spawn(
+    'npx',
+    ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', JSON.stringify({ repo_path: repoPath })],
+    { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
+  );
+  child.on('exit', (code) => {
+    if (code === 0) console.log('[codebase-memory] auto-index completed');
+    else console.warn(`[codebase-memory] auto-index exited with code ${code}`);
+  });
+}
+
 function main() {
   ensureDir(dataDir);
   ensureDir(cbmCacheDir);
@@ -152,6 +174,10 @@ function main() {
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
   fs.writeFileSync(adminConfigPath, JSON.stringify(adminConfig, null, 2));
+
+  if (process.env.CBM_AUTO_INDEX_PATH) {
+    autoIndexCodebaseMemory(cbmCacheDir, process.env.CBM_AUTO_INDEX_PATH);
+  }
 
   const dbPath = path.join(dataDir, 'gateway.db');
   const env = { ...process.env, DEV_ALLOW_UNAUTHENTICATED: 'true', CI: 'true' };

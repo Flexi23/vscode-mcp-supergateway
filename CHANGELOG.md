@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.2.0] - 2026-08-16
 ### Changed
+- **Breaking:** `.env`'s `SIYUAN_WORKSPACE_DIR` is replaced by `WORKSPACE_ROOT`, an absolute host path to the workspace root. `docker-compose.yml` derives both the `siyuan` service's workspace bind mount (`${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace`) and a new read-only `gateway` mount (`${WORKSPACE_ROOT}:/workspace/root:ro`) from it, so only one variable needs to be set.
+- `gateway.ts` gained `autoIndexCodebaseMemory()`, which runs `codebase-memory-mcp cli index_repository` against the new `CBM_AUTO_INDEX_PATH` env var (`/workspace/root`) on container startup instead of requiring a manual "Index this project" tool call. It runs detached/non-blocking so a large first index doesn't delay the gateway/proxy from coming up.
 - **Breaking:** the aggregated `markdown-vault` upstream (`@wirux/mcp-markdown-vault`) is replaced by a `siyuan-note` upstream (`siyuan-mcp`), talking over REST to a new `siyuan` Docker Compose service (image `b3log/siyuan`, port `6806`). `docker/gateway.config.json` and `src/gateway.ts`'s `buildAdminConfig()` inject `SIYUAN_HOST`/`SIYUAN_PORT`/`SIYUAN_TOKEN` instead of `VAULT_PATH` for that upstream.
 - **Breaking:** the local file-based vault subsystem is removed entirely. `src/services/vaultManager.ts` is deleted; a new `src/services/siyuanClient.ts` (`SiyuanClient`) talks to the SiYuan Kernel API (`readDoc`/`writeDoc`/`listNotebooks`) instead. `src/tools/lmstudioLoopback.ts`'s `lmstudio_update_vault_task` tool is replaced by `lmstudio_update_siyuan_task` (`doc_id` + `content`, writes via `SiyuanClient`), `src/services/loopbackWorkflow.ts`'s `LoopbackWorkflow` now reads task docs from SiYuan instead of vault files, and `src/server.ts` drops the `/api/vault/notes*` REST routes.
-- `docker-compose.yml`: the `gateway-vault` named volume and its `/app/vault` mount are removed (no longer needed). The `siyuan` service's workspace is now a host bind mount controlled by the new `SIYUAN_WORKSPACE_DIR` env var instead of the `siyuan-workspace` named volume, so notebooks/docs are directly inspectable/backupable on the host. `gateway-data` is unaffected.
-- `.env.example` gained `SIYUAN_TOKEN`, `SIYUAN_ACCESS_AUTH_CODE`, and `SIYUAN_WORKSPACE_DIR`. `README.md`, `AGENT_INSTRUCTIONS.md`, and the architecture diagram/tables updated accordingly.
+- `docker-compose.yml`: the `gateway-vault` named volume and its `/app/vault` mount are removed (no longer needed). The `siyuan` service's workspace is now a host bind mount derived from `WORKSPACE_ROOT` instead of the `siyuan-workspace` named volume, so notebooks/docs are directly inspectable/backupable on the host. `gateway-data` is unaffected.
+- `.env.example` gained `SIYUAN_TOKEN`, `SIYUAN_ACCESS_AUTH_CODE`, and `WORKSPACE_ROOT`. `README.md`, `AGENT_INSTRUCTIONS.md`, and the architecture diagram/tables updated accordingly.
 
 ## [2.1.0] - 2026-08-16
 ### Added
