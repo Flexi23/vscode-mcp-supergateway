@@ -64,7 +64,32 @@ graph LR
     Proxy --> GitLab
     Proxy --> MarkItDown
     Proxy --> MarkdownVault
+
+    click Supergateway "src/gateway.ts" "Entry point: src/gateway.ts (main())"
+    click Loopback "src/server.ts" "Entry point: src/server.ts (startBackendServer)"
+    click Proxy href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway" _blank
+    click MCP href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway (RBAC & tool access)" _blank
+    click MarkdownVault href "https://www.npmjs.com/package/@wirux/mcp-markdown-vault" "npm: @wirux/mcp-markdown-vault" _blank
+    click CodebaseMemory href "https://www.npmjs.com/package/codebase-memory-mcp" "npm: codebase-memory-mcp" _blank
+    click GitLab href "https://www.npmjs.com/package/@zereight/mcp-gitlab" "npm: @zereight/mcp-gitlab" _blank
+    click MarkItDown href "https://pypi.org/project/markitdown-mcp/" "PyPI: markitdown-mcp" _blank
+    click LMStudioServer href "https://lmstudio.ai/docs/app/api" "LM Studio local server docs" _blank
+    click LMStudioUI href "https://lmstudio.ai/" "LM Studio" _blank
+
+    classDef entryPoint fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a;
+    classDef thirdParty fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f;
+    classDef hostApp fill:#e5e7eb,stroke:#4b5563,stroke-width:1px,color:#111827;
+
+    class Supergateway,Loopback entryPoint;
+    class Proxy,MCP,MarkdownVault,CodebaseMemory,GitLab,MarkItDown thirdParty;
+    class Copilot,LMStudioServer,LMStudioUI,LocalAgents hostApp;
+
+    style Host fill:#f8fafc,stroke:#64748b,stroke-width:1px
+    style LMStudio fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px,stroke-dasharray: 3 3
+    style Docker fill:#ecfeff,stroke:#0e7490,stroke-width:2px
 ```
+
+Legend: 🟦 blue = this repo's code entry points (click to open the source file) · 🟨 amber = third-party MCP servers/packages (click for npm/PyPI page) · ⬜ grey = host-side applications you already run (VS Code, LM Studio). Subgraph backgrounds: outer host boundary in slate, the LM Studio group dashed, the Docker Compose boundary in cyan.
 
 ---
 
