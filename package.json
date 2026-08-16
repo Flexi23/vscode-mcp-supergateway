@@ -2,7 +2,7 @@
   "name": "vscode-mcp-supergateway",
   "version": "2.0.0",
   "description": "MCP Supergateway for LM Studio and other tools",
-  "main": "dist/server.js",
+  "main": "dist/gateway.js",
   "scripts": {
     "build": "tsc"
   },

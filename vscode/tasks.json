@@ -1,0 +1,42 @@
+{
+	// =====================================================================================
+	// VERSIONED TEMPLATE for the workspace-root ".vscode/tasks.json"
+	// -------------------------------------------------------------------------------------
+	// Copy verbatim to <workspace-root>/.vscode/tasks.json. See the header of the sibling
+	// launch.json and vre-devkit/README.md → "Workspace .vscode from template" for the why.
+	// All paths use ${workspaceFolder} (= the opened root folder) + an explicit project
+	// prefix, never the multi-root "${workspaceFolder:name}" form.
+	// =====================================================================================
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "start supergateway",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"compose",
+				"-f",
+				"${workspaceFolder}/vscode-mcp-supergateway/docker-compose.yml",
+				"up",
+				"-d",
+				"--build"
+			],
+			"runOptions": {
+				"runOn": "folderOpen"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "stop supergateway",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"compose",
+				"-f",
+				"${workspaceFolder}/vscode-mcp-supergateway/docker-compose.yml",
+				"down"
+			],
+			"problemMatcher": []
+		}
+	]
+}

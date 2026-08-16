@@ -1,15 +1,4 @@
 services:
-  backend:
-    build: .
-    image: vscode-mcp-supergateway-backend:local
-    command: ["node", "dist/server.js"]
-    ports:
-      - "8081:8081"
-    environment:
-      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
-      PORT: "8081"
-    restart: unless-stopped
-
   gateway:
     build: .
     image: vscode-mcp-supergateway-backend:local
@@ -17,8 +6,11 @@ services:
     ports:
       - "8080:8080"
       - "3100:3100"
+      - "8081:8081"
     environment:
       GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
+      LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
+      BACKEND_PORT: "8081"
     volumes:
       - gateway-vault:/app/vault
       - gateway-data:/app/data

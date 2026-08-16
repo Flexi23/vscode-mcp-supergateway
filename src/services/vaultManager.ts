@@ -5,10 +5,8 @@ export class VaultManager {
   private readonly vaultRoot: string;
 
   constructor(vaultPath?: string) {
-    // Default to vscode-mcp-supergateway/vault
-    this.vaultRoot = vaultPath 
-      ? path.resolve(vaultPath) 
-      : path.resolve(process.cwd(), 'vscode-mcp-supergateway', 'vault');
+    // Shares VAULT_PATH with the markdown-vault upstream so both see the same files.
+    this.vaultRoot = path.resolve(vaultPath ?? process.env.VAULT_PATH ?? path.resolve(__dirname, '../../vault'));
   }
 
   private getVaultPath(relativePath: string) {
@@ -105,7 +103,7 @@ export class VaultManager {
     const newYamlLines: string[] = [];
     for (const [key, value] of Object.entries(mergedFrontmatter)) {
       if (Array.isArray(value)) {
-        newYamlLines.push(`${key}: [${value.map(v => `"${v}"`).join(', ')}]`);
+        newYamlLines.push(`${key}: [${value.map((v: any) => `"${v}"`).join(', ')}]`);
       } else if (typeof value === 'string') {
         newYamlLines.push(`${key}: "${value}"`);
       } else {

@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import { startBackendServer } from './server';
 
 interface UpstreamConfig {
   id: string;
@@ -95,6 +96,8 @@ function main() {
   ensureDir(vaultDir);
   ensureDir(dataDir);
   ensureDir(path.join(dataDir, 'cbm-cache'));
+  // Shares vaultDir with the backend's VaultManager, which reads it via process.env.
+  process.env.VAULT_PATH = vaultDir;
 
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
@@ -115,6 +118,7 @@ function main() {
   });
 
   startForwardProxy(publicPort, adminPort);
+  startBackendServer(Number(process.env.BACKEND_PORT || 8081));
 }
 
 main();
