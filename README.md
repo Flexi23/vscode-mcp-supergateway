@@ -30,14 +30,14 @@ graph LR
         end
 
         subgraph Docker["🐳 Docker Compose"]
-            Supergateway["Supergateway MCP Server<br/>(Admin UI :3100)"]
+            Supergateway["Supergateway MCP Server<br/>(admin UI :3100)"]
 
-            Loopback@{ shape: subproc, label: "Agent Tasks<br/>(Loopback API :8081)" }
+            Loopback@{ shape: subproc, label: "Agent Tasks<br/>(loopback API :8081)" }
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate" }
-            MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080, public)" }
+            MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
             MarkdownVault["Markdown Vault MCP<br/>(tasks, ADRs & specs)"]
-            CodebaseMemory["Codebase Memory MCP<br>Control & 3D Graph UI :9547"]
+            CodebaseMemory["Codebase Memory MCP<br>(3D graph/admin UI :9749)"]
             GitLab["GitLab MCP"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
         end
