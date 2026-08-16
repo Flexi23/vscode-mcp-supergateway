@@ -1,38 +1,25 @@
-# Development Plan: vscode-mcp-supergateway
+# System Role
+You are an expert TypeScript and C# developer specializing in VS Code Extension development, Language Server Protocol (LSP), and the Model Context Protocol (MCP).
 
-## 1. Project Goal & Philosophy
-**vscode-mcp-supergateway** is a local hub that coordinates MCP requests between IDEs and LLMs.
-*Important rule for development:* Since we are working with local agents (12B class), this plan is divided into **very small, isolated steps**. Each step ideally touches only 1 to a maximum of 2 files.
+# Context
+I am developing `vscode-mcp-supergateway`, a central Multi-Client MCP Gateway. Currently, I am building a "codebase memory graph" to visualize and index workspaces in a 3D graph (using nodes and edges).
 
----
+My indexer already runs on workspace binding and successfully extracts all C# files as independent `nodes` in my 3D cloud. However, I am missing the `edges` (dependencies/connections) between these C# files. Because C# uses implicit references via namespaces (unlike explicit `import` statements in JS/TS), a simple Regex or string-matching parser fails to build accurate connections.
 
-## 2. Current Status
-- ✅ **LM Studio Client:** Basic setup and resilience are in place (timeout guards).
-- ✅ **Process Management:** Node.js Process Manager is running.
-- 🚧 **Base Infrastructure:** Vault management and routing are under construction.
+# Task
+I want to implement a robust solution to extract cross-file dependencies and generate the `edges` for my graph. Since this is running inside a VS Code extension, the most elegant and precise way is to leverage the active C# Language Server (OmniSharp or C# Dev Kit) via VS Code's built-in provider APIs, rather than building a standalone Roslyn analyzer from scratch.
 
----
+Please provide a TypeScript implementation for my VS Code extension that:
+1. Takes a list of indexed C# file URIs (`nodes`).
+2. Programmatically queries the C# Language Server using VS Code's built-in commands (e.g., `vscode.executeDocumentSymbolProvider` combined with `vscode.executeReferenceProvider` or `vscode.executeDefinitionProvider`).
+3. Maps these references/definitions back to other files in the workspace to construct the `edges`.
+4. Outputs the final result as a standard graph links array: `[{ "source": "FileA.cs", "target": "FileB.cs", "weight": 1 }]`.
 
-## 3. Next Milestones (Granular)
+# Constraints & Environment
+- **LLM/Hardware Context:** I am running a local LM Studio worker (Gemma 4 12B, 100k context) on a machine with an i9, 16GB System RAM, and an 8GB VRAM RTX 2070. The extraction process should be hardware-aware — meaning the TypeScript implementation should use batching, pagination, or async generators so it doesn't freeze the VS Code extension host or overload the system when querying hundreds of files.
+- Ensure the code checks if the C# extension is active/ready before querying.
+- Keep the code modular so I can easily integrate it into my existing indexer loop.
+- Focus on extracting structural dependencies (e.g., Class A in File 1 uses Class B in File 2).
 
-### Phase 1: Complete Base Vault
-*Goal: A simple file system without complex task management.*
-- [ ] **Task 1.1:** Test and extensively finalize `vaultManager.ts`. Ensure that `readNote` and `writeNote` work. Do not add any further features.
-- [ ] **Task 1.2:** Integrate `vaultManager.ts` into a simple API route in `server.ts` to enable rudimentary testing of the function.
-
-### Phase 2: Establish Dummy Routing
-*Goal: The gateway server receives requests and returns a hardcoded string to secure the VS Code connection.*
-- [ ] **Task 2.1:** Simplify `server.ts`. Set up an endpoint that is recognized by VS Code as an MCP server.
-- [ ] **Task 2.2:** Forward an incoming request to the `LMStudioClient` – very simply, without dynamic loopbacks.
-
-### Phase 3: The Simple Loopback Test
-*Goal: The local model can read a note using a tool.*
-- [ ] **Task 3.1:** Register **only a single tool** (`read_note`) in `lmstudioLoopback.ts`. Temporarily remove all other tool definitions to minimize prompt overhead.
-- [ ] **Task 3.2:** Execute a test call. If the model can read the file, Phase 3 is complete.
-
----
-
-## 4. Instructions for the Local Agent
-1. **One task at a time:** Never work on tasks from different phases simultaneously.
-2. **KISS Principle:** (Keep it simple, stupid). Do not invent abstract classes or interfaces if a simple function suffices.
-3. **Context Limit:** Only load the file into the editor/context that is explicitly mentioned in the current task.
+# Output Request
+Provide the complete, documented TypeScript module, along with a brief explanation of how the VS Code API calls are chained together to mimic Roslyn's semantic dependency resolution.
