@@ -37,13 +37,13 @@ graph LR
             MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080, public)" }
 
             MarkdownVault["Markdown Vault MCP<br/>(tasks, ADRs & specs)"]
-            CodebaseMemory["Codebase Memory MCP"]
+            CodebaseMemory["Codebase Memory MCP<br>Control & 3D Graph UI :9547"]
             GitLab["GitLab MCP"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
         end
     end
 
-    Supergateway --> |reverse proxy| Proxy
+    Supergateway --> |forward proxy| Proxy
     Supergateway --> |scheduler| Loopback
     Loopback <-. reads & updates .-> MarkdownVault
     Supergateway --> |provider|MCP
@@ -65,8 +65,8 @@ graph LR
     Proxy --> MarkItDown
     Proxy --> MarkdownVault
 
-    click Supergateway "src/gateway.ts" "Entry point: src/gateway.ts (main())"
-    click Loopback "src/server.ts" "Entry point: src/server.ts (startBackendServer)"
+    click Supergateway "blob/main/src/gateway.ts" "Entry point: src/gateway.ts (main())"
+    click Loopback "blob/main/src/server.ts" "Entry point: src/server.ts (startBackendServer)"
     click Proxy href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway" _blank
     click MCP href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway (RBAC & tool access)" _blank
     click MarkdownVault href "https://www.npmjs.com/package/@wirux/mcp-markdown-vault" "npm: @wirux/mcp-markdown-vault" _blank
@@ -159,6 +159,7 @@ The admin UI lives at <http://localhost:3100/admin>.
 | `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. |
 | `3100` | `@mspstack/mcp-gateway` admin UI + direct MCP endpoint. |
 | `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`), started in-process via `startBackendServer()`. |
+| `9749` | `codebase-memory-mcp`'s own 3D graph-visualization UI (<http://localhost:9749>). Its coordination daemon only binds `127.0.0.1` and rejects cross-origin browser requests, so `gateway.ts` enables it via `CBM_CACHE_DIR/config.json` and reverse-proxies the published port to it, rewriting `Origin`/`Referer` to satisfy its same-origin check; override the port with `CBM_UI_PORT`. |
 
 Both halves share the same `VAULT_PATH` (`/app/vault`), so the loopback tools and the `markdown-vault` upstream read/write the same files.
 
@@ -176,7 +177,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-index off by default; own UI on port 9749. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-index off by default; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
 | `markdown-vault` | `@wirux/mcp-markdown-vault` | Node | `VAULT_PATH` env var; vault directory is auto-created on start if missing. |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |

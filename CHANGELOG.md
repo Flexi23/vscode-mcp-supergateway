@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [2.1.0] - 2026-08-16
+### Added
+- `codebase-memory-mcp`'s built-in 3D graph-visualization UI is now reachable from outside the container at `http://localhost:9749`. `gateway.ts` writes `ui_enabled`/`ui_port` into the `codebase-memory` upstream's `CBM_CACHE_DIR/config.json` before that upstream's stdio session starts its coordination daemon (the daemon owns and serves the UI, bound to `127.0.0.1` only), then reverse-proxies the published port to it. The proxy binds the container's real interface address (not `0.0.0.0`, which would clash with the daemon's same-port loopback listener) and rewrites the `Origin`/`Referer` headers to `http://127.0.0.1:<port>`, since the daemon's same-origin check rejects the browser's literal `localhost` Origin with a 403. `docker-compose.yml`/`Dockerfile` publish/expose `9749`, configurable via the new `CBM_UI_PORT` env var.
+
 ### Changed
 - `backend` and `gateway` merged into a single container/process: `server.ts` now exports `startBackendServer()` instead of listening at module scope, and `gateway.ts` calls it directly after starting the forward proxy, sharing `VAULT_PATH` via `process.env` so `VaultManager` and the `markdown-vault` upstream see the same files. `docker-compose.yml` drops the separate `backend` service (image, `8081` port, and its env vars folded into `gateway`), `Dockerfile` now runs `CMD ["node", "dist/gateway.js"]` and exposes `8081` alongside `8080`/`3100`, and `package.json`'s `main` points at `dist/gateway.js`. `node dist/server.js` still works standalone for local dev via a `require.main === module` guard.
 - `VaultManager`'s default vault root now resolves from `VAULT_PATH` (falling back to `<repo>/vault`) instead of a `process.cwd()`-relative guess, so it behaves the same whether started standalone or from `gateway.ts`.

@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import os from 'os';
 import { startBackendServer } from './server';
 
 interface UpstreamConfig {
@@ -24,6 +25,8 @@ const dataDir = process.env.GATEWAY_DATA_DIR || '/app/data';
 const vaultDir = process.env.VAULT_PATH || '/app/vault';
 const adminPort = Number(process.env.MCP_GATEWAY_ADMIN_PORT || 3100);
 const publicPort = Number(process.env.MCP_GATEWAY_PUBLIC_PORT || 8080);
+const cbmUiPort = Number(process.env.CBM_UI_PORT || 9749);
+const cbmCacheDir = path.join(dataDir, 'cbm-cache');
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -41,19 +44,34 @@ function buildAdminConfig(): GatewayConfig {
       upstream.env = { ...upstream.env, VAULT_PATH: vaultDir };
     }
     if (upstream.id === 'codebase-memory') {
-      upstream.env = { ...upstream.env, CBM_CACHE_DIR: path.join(dataDir, 'cbm-cache') };
+      upstream.env = { ...upstream.env, CBM_CACHE_DIR: cbmCacheDir };
     }
   }
 
   return config;
 }
 
-function startForwardProxy(port: number, targetPort: number) {
+function startForwardProxy(
+  port: number,
+  targetPort: number,
+  options: { bindHost?: string; rewriteOriginToLoopback?: boolean } = {},
+) {
+  const { bindHost = '0.0.0.0', rewriteOriginToLoopback = false } = options;
+
   const server = http.createServer((req, res) => {
     if (req.method === 'GET' && req.url === '/ping') {
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('ok');
       return;
+    }
+
+    const headers = { ...req.headers, host: `127.0.0.1:${targetPort}` };
+    // The CBM UI's same-origin check only accepts an Origin/Referer whose host is
+    // literally 127.0.0.1 (its own bind address) — it rejects the browser's
+    // "localhost" Origin even though it resolves to the same address.
+    if (rewriteOriginToLoopback) {
+      if (headers.origin) headers.origin = `http://127.0.0.1:${targetPort}`;
+      if (headers.referer) headers.referer = `http://127.0.0.1:${targetPort}/`;
     }
 
     const upstreamRequest = http.request(
@@ -62,7 +80,7 @@ function startForwardProxy(port: number, targetPort: number) {
         port: targetPort,
         method: req.method,
         path: req.url,
-        headers: { ...req.headers, host: `127.0.0.1:${targetPort}` },
+        headers,
       },
       (upstreamResponse) => {
         res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
@@ -87,15 +105,51 @@ function startForwardProxy(port: number, targetPort: number) {
     req.pipe(upstreamRequest);
   });
 
-  server.listen(port, '0.0.0.0', () => {
-    console.log(`[proxy] forwarding 0.0.0.0:${port} -> 127.0.0.1:${targetPort}`);
+  server.listen(port, bindHost, () => {
+    console.log(`[proxy] forwarding ${bindHost}:${port} -> 127.0.0.1:${targetPort}`);
   });
+}
+
+// Docker's published-port DNAT targets the container's real interface IP, not
+// its loopback, so binding here (rather than 0.0.0.0) avoids clashing with a
+// same-port 127.0.0.1-only listener (the CBM UI) inside the same container.
+function getContainerAddress(): string {
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        return addr.address;
+      }
+    }
+  }
+  return '0.0.0.0';
+}
+
+// Standalone graph-visualization server, sharing CBM_CACHE_DIR with the stdio
+// upstream so it shows the same indexed projects; the coordination daemon
+// dedupes this against the MCP upstream's own session instead of double-serving.
+function configureCodebaseMemoryUi(cacheDir: string, port: number) {
+  // ui_enabled/ui_port live in CBM_CACHE_DIR/config.json (not the `config set` store).
+  // Writing it before the codebase-memory upstream's stdio session starts its
+  // coordination daemon makes that daemon serve the graph UI on this port —
+  // running a second `--ui=true` CLI invocation just starts/stops its own stdio
+  // session immediately (EOF on stdin) without leaving anything listening.
+  const configPath = path.join(cacheDir, 'config.json');
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch {
+    // no existing config yet
+  }
+  fs.writeFileSync(configPath, JSON.stringify({ ...existing, ui_enabled: true, ui_port: port }, null, 2));
 }
 
 function main() {
   ensureDir(vaultDir);
   ensureDir(dataDir);
-  ensureDir(path.join(dataDir, 'cbm-cache'));
+  ensureDir(cbmCacheDir);
+  // Keep configured/published ports identical: the CBM UI rejects requests whose
+  // Origin/Referer port doesn't match its own configured ui_port (403).
+  configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort);
   // Shares vaultDir with the backend's VaultManager, which reads it via process.env.
   process.env.VAULT_PATH = vaultDir;
 
@@ -119,6 +173,10 @@ function main() {
 
   startForwardProxy(publicPort, adminPort);
   startBackendServer(Number(process.env.BACKEND_PORT || 8081));
+  startForwardProxy(cbmUiPort, cbmUiPort, {
+    bindHost: getContainerAddress(),
+    rewriteOriginToLoopback: true,
+  });
 }
 
 main();

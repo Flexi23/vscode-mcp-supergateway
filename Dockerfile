@@ -22,5 +22,5 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY docker ./docker
-EXPOSE 8080 3100 8081
+EXPOSE 8080 3100 8081 9749
 CMD ["node", "dist/gateway.js"]
