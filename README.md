@@ -19,35 +19,51 @@ As MCP usage grows, managing multiple disjointed MCP servers across different cl
 Everything except your IDE and LM Studio runs inside Docker — the containers bring their own Node.js, Python, and all four upstream MCP servers.
 
 ```mermaid
-graph TB
+graph LR
     subgraph Host["🖥 Host machine"]
-        Copilot["VS Code / Copilot Chat<br/>(cloud frontier models)"]
-        LMStudioUI["LM Studio client UI"]
-        LMStudioServer["LM Studio local server<br/>(Gemma, LFM, Qwen, ...)<br/>:1234"]
+        Copilot["VS Code / Copilot Chat"]
+
+        subgraph LMStudio["LM Studio"]
+          LMStudioServer["Local API server :1234"]
+          LMStudioUI["Client UI"]
+          LocalAgents@{ shape: subproc, label: "local agents" }
+        end
 
         subgraph Docker["🐳 Docker Compose"]
-            subgraph GatewaySvc["gateway — :8080 public, :3100 admin"]
-                Proxy["Supergateway proxy<br/>+ MCP gateway"]
-                CodebaseMemory["Codebase Memory"]
-                MarkdownVault["Markdown Vault<br/>(tasks, ADRs & specs)"]
-                GitLab["GitLab integration"]
-                MarkItDown["MarkItDown<br/>(docs/Office/PDF to Markdown)"]
-            end
+            Supergateway["Supergateway MCP Server<br/>(Admin UI :3100)"]
 
-            BackendSvc["backend — :8081<br/>LM Studio loopback tools"]
+            Loopback@{ shape: subproc, label: "Agent Tasks<br/>(Loopback API :8081)" }
+            Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate" }
+            MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080, public)" }
+
+            MarkdownVault["Markdown Vault MCP<br/>(tasks, ADRs & specs)"]
+            CodebaseMemory["Codebase Memory MCP"]
+            GitLab["GitLab MCP"]
+            MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
         end
     end
 
-    Copilot -->|"MCP over :8080"| Proxy
-    LMStudioUI -->|"MCP over :8080"| Proxy
+    Supergateway --> |reverse proxy| Proxy
+    Supergateway --> |scheduler| Loopback
+    Loopback <-. reads & updates .-> MarkdownVault
+    Supergateway --> |provider|MCP
+
+    MCP --> Copilot
+    MCP --> LMStudioServer
+
+    LMStudioServer --> |openweight model provider| LocalAgents
+    LMStudioServer --> |diff / changeset| Loopback
+    Loopback --> |managed prompt| LMStudioServer
+    Loopback -. prepare context for<br/> cloud frontier models .-> Copilot
+
+    LocalAgents --> Copilot
+    LocalAgents --> Loopback
+    LocalAgents --> LMStudioUI
 
     Proxy --> CodebaseMemory
-    Proxy --> MarkdownVault
     Proxy --> GitLab
     Proxy --> MarkItDown
-
-    BackendSvc -->|"host.docker.internal:1234"| LMStudioServer
-    BackendSvc -. "reads/updates" .-> MarkdownVault
+    Proxy --> MarkdownVault
 ```
 
 ---
@@ -111,12 +127,15 @@ The admin UI lives at <http://localhost:3100/admin>.
 
 ## 📦 Services & Ports
 
-Both services are built from the same image (`vscode-mcp-supergateway-backend:local`), defined in [`docker-compose.yml`](docker-compose.yml):
+`gateway.ts` and `server.ts` run as a single Node process in a single container (`vscode-mcp-supergateway-backend:local`), started via `node dist/gateway.js` (see [`docker-compose.yml`](docker-compose.yml)). `gateway.ts` imports and starts `server.ts`'s Express app directly instead of spawning a second container.
 
-| Service | Command | Ports | What it is |
-|---|---|---|---|
-| `gateway` | `node dist/gateway.js` | `8080` public, `3100` admin UI + direct MCP endpoint | The full multi-upstream MCP gateway (`@mspstack/mcp-gateway` plus all four upstreams below), everything bundled in the image. |
-| `backend` | `node dist/server.js` | `8081` | The Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`). Deliberately on a *different* port than `gateway` — `8080` is the port your MCP client connects to, so squatting it here would silently break that connection. |
+| Port | What it is |
+|---|---|
+| `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. |
+| `3100` | `@mspstack/mcp-gateway` admin UI + direct MCP endpoint. |
+| `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`), started in-process via `startBackendServer()`. |
+
+Both halves share the same `VAULT_PATH` (`/app/vault`), so the loopback tools and the `markdown-vault` upstream read/write the same files.
 
 ### What is `@mspstack/mcp-gateway`?
 
@@ -162,7 +181,6 @@ Notes:
 - **Data persistence:** the vault and gateway DB live in named volumes (`gateway-vault`, `gateway-data`), not bind mounts — inspect with `docker compose exec gateway sh`.
 - **Node ≥24 required:** `@mspstack/mcp-gateway` declares it in its `engines` field, so [`Dockerfile`](Dockerfile) uses `node:24-alpine` (builder) / `node:24-bookworm-slim` (runtime). Do not downgrade to `node:20`.
 - **Image size (~2.9 GB):** caused by Python's `markitdown[all]` (onnxruntime, pandas, azure SDKs, ...) plus ~330 Node packages. Accepted trade-off for having zero host-level dependencies.
-- **Slow `docker compose build`?** Because both services share one image name, Compose builds the targets separately. A single `docker build -t vscode-mcp-supergateway-backend:local .` is often noticeably faster.
 
 ---
 
