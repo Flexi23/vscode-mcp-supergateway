@@ -1,10 +1,9 @@
 import { lmstudioClient } from '../services/lmstudio';
 import { z } from 'zod';
-import fs from 'fs';
 import { execSync } from 'child_process';
-import { VaultManager } from '../services/vaultManager';
+import { SiyuanClient } from '../services/siyuanClient';
 
-export const registerLMStudioTools = (registerTool: (tool: any) => void, vaultManager: VaultManager) => {
+export const registerLMStudioTools = (registerTool: (tool: any) => void, siyuanClient: SiyuanClient) => {
   
   // 1. lmstudio_complete
   const lmstudioCompleteSchema = z.object({
@@ -66,23 +65,23 @@ export const registerLMStudioTools = (registerTool: (tool: any) => void, vaultMa
     },
   });
 
-  // 3. lmstudio_update_vault_task
-  const lmstudioUpdateVaultTaskSchema = z.object({
-    task_path: z.string().min(1),
+  // 3. lmstudio_update_siyuan_task
+  const lmstudioUpdateSiyuanTaskSchema = z.object({
+    doc_id: z.string().min(1),
     content: z.string().min(1),
   });
 
   registerTool({
-    name: 'lmstudio_update_vault_task',
-    description: 'Update YAML frontmatter and task markdown files within the vault.',
-    inputSchema: lmstudioUpdateVaultTaskSchema.shape,
+    name: 'lmstudio_update_siyuan_task',
+    description: 'Update a task document in SiYuan Note with new Markdown content.',
+    inputSchema: lmstudioUpdateSiyuanTaskSchema.shape,
     execute: async (args: any) => {
       try {
-        const validatedArgs = lmstudioUpdateVaultTaskSchema.parse(args);
-        vaultManager.writeNote(validatedArgs.task_path, validatedArgs.content);
-        return { content: `Successfully updated ${validatedArgs.task_path}` };
+        const validatedArgs = lmstudioUpdateSiyuanTaskSchema.parse(args);
+        await siyuanClient.writeDoc(validatedArgs.doc_id, validatedArgs.content);
+        return { content: `Successfully updated ${validatedArgs.doc_id}` };
       } catch (e: any) {
-        return { content: `Error updating vault task: ${e.message}` };
+        return { content: `Error updating SiYuan task: ${e.message}` };
       }
     },
   });

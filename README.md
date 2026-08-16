@@ -45,7 +45,7 @@ graph LR
 
     Supergateway --> |forward proxy| Proxy
     Supergateway --> |scheduler| Loopback
-    Loopback <-. reads & updates .-> VaultFiles@{ shape: cyl, label: "Vault files<br/>(internal, /app/vault)" }
+    Loopback <-. reads & updates .-> SiYuanNote
     Supergateway --> |provider|MCP
 
     MCP --> Copilot
@@ -82,7 +82,7 @@ graph LR
 
     class Supergateway,Loopback entryPoint;
     class Proxy,MCP,SiYuanNote,CodebaseMemory,GitLab,MarkItDown thirdParty;
-    class Copilot,LMStudioServer,LMStudioUI,LocalAgents,VaultFiles hostApp;
+    class Copilot,LMStudioServer,LMStudioUI,LocalAgents hostApp;
 
     style Host fill:#f8fafc,stroke:#64748b,stroke-width:1px
     style LMStudio fill:#f1f5f9,stroke:#94a3b8,stroke-width:1px,stroke-dasharray: 3 3
@@ -115,7 +115,8 @@ Then edit [`.env`](.env.example):
 |---|---|---|
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
 | `SIYUAN_TOKEN` | for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token) for the `siyuan` Compose service. Without it the upstream can't authenticate against the SiYuan kernel. |
-| `SIYUAN_ACCESS_AUTH_CODE` | recommended for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); leave unset only for trusted local-only use. |
+| `SIYUAN_ACCESS_AUTH_CODE` | **required** for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start without it (or `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true`). |
+| `SIYUAN_WORKSPACE_DIR` | for the `siyuan` service | Host directory bind-mounted as the SiYuan workspace (notebooks/docs/assets persist there). Relative paths resolve against the repo root. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
 
 ### 3. Start
@@ -160,10 +161,10 @@ The admin UI lives at <http://localhost:3100/admin>.
 |---|---|
 | `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. |
 | `3100` | `@mspstack/mcp-gateway` admin UI + direct MCP endpoint. |
-| `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_vault_task`), started in-process via `startBackendServer()`. |
+| `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`), started in-process via `startBackendServer()`. |
 | `9749` | `codebase-memory-mcp`'s own 3D graph-visualization UI (<http://localhost:9749>). Its coordination daemon only binds `127.0.0.1` and rejects cross-origin browser requests, so `gateway.ts` enables it via `CBM_CACHE_DIR/config.json` and reverse-proxies the published port to it, rewriting `Origin`/`Referer` to satisfy its same-origin check; override the port with `CBM_UI_PORT`. |
 
-The internal LM Studio loopback tools (`lmstudio_update_vault_task`) keep using `VAULT_PATH` (`/app/vault`) directly via `VaultManager` — that vault is no longer exposed as its own MCP upstream (see [Configured Upstreams](#-configured-upstreams)).
+The LM Studio loopback's `lmstudio_update_siyuan_task` tool reads/writes SiYuan documents directly via `SiyuanClient` (`src/services/siyuanClient.ts`), the same backend the `siyuan-note` upstream talks to (see [Configured Upstreams](#-configured-upstreams)).
 
 ### What is `@mspstack/mcp-gateway`?
 
@@ -206,7 +207,7 @@ docker compose down            # stop and remove
 ```
 
 Notes:
-- **Data persistence:** the vault and gateway DB live in named volumes (`gateway-vault`, `gateway-data`), not bind mounts — inspect with `docker compose exec gateway sh`.
+- **Data persistence:** the gateway DB lives in the `gateway-data` named volume (not a bind mount) — inspect with `docker compose exec gateway sh`. The SiYuan workspace is a host bind mount at `SIYUAN_WORKSPACE_DIR` (see [.env.example](.env.example)), so it's directly inspectable/backupable on the host.
 - **Node ≥24 required:** `@mspstack/mcp-gateway` declares it in its `engines` field, so [`Dockerfile`](Dockerfile) uses `node:24-alpine` (builder) / `node:24-bookworm-slim` (runtime). Do not downgrade to `node:20`.
 - **Image size (~2.9 GB):** caused by Python's `markitdown[all]` (onnxruntime, pandas, azure SDKs, ...) plus ~330 Node packages. Accepted trade-off for having zero host-level dependencies.
 
@@ -233,7 +234,7 @@ docker compose up -d --build
 
 ### Phase 1: MVP & Core Gateway (Current)
 - [x] Basic stdio / SSE transport routing.
-- [x] Multi-backend server orchestration (Codebase Memory, GitLab, Vault).
+- [x] Multi-backend server orchestration (Codebase Memory, GitLab, SiYuan Note).
 - [x] Initial agent-assisted development groundwork.
 
 ### Phase 2: LM Studio Loopback & Context Worker
@@ -241,9 +242,9 @@ docker compose up -d --build
 - [ ] Add zero-blocking async tool handling for local inference.
 - [ ] Graceful fallback & timeout management when local GPUs are under heavy load.
 
-### Phase 3: Vault & Task Management Enhancements
-- [ ] Standardized YAML-Frontmatter parser for Markdown Vault (`tasks/`, `adrs/`).
-- [ ] Agent scope security layer (`agent_access: read | append | edit | hidden`).
+### Phase 3: SiYuan Note & Task Management Enhancements
+- [ ] Structured task/ADR documents in SiYuan, driven by the `siyuan-note` upstream and `lmstudio_update_siyuan_task`.
+- [ ] Agent scope security layer (permission checks around destructive SiYuan operations).
 - [ ] Automated context bundle generator for Copilot prompts.
 
 ---

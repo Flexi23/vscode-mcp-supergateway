@@ -15,7 +15,6 @@ services:
       CBM_UI_PORT: "9749"
       SIYUAN_TOKEN: ${SIYUAN_TOKEN}
     volumes:
-      - gateway-vault:/app/vault
       - gateway-data:/app/data
     restart: unless-stopped
     depends_on:
@@ -27,10 +26,8 @@ services:
     ports:
       - "6806:6806"
     volumes:
-      - siyuan-workspace:/siyuan/workspace
+      - ${SIYUAN_WORKSPACE_DIR}:/siyuan/workspace
     restart: unless-stopped
 
 volumes:
-  gateway-vault:
   gateway-data:
-  siyuan-workspace:

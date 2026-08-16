@@ -22,7 +22,6 @@ interface GatewayConfig {
 }
 
 const dataDir = process.env.GATEWAY_DATA_DIR || '/app/data';
-const vaultDir = process.env.VAULT_PATH || '/app/vault';
 const adminPort = Number(process.env.MCP_GATEWAY_ADMIN_PORT || 3100);
 const publicPort = Number(process.env.MCP_GATEWAY_PUBLIC_PORT || 8080);
 const cbmUiPort = Number(process.env.CBM_UI_PORT || 9749);
@@ -144,14 +143,11 @@ function configureCodebaseMemoryUi(cacheDir: string, port: number) {
 }
 
 function main() {
-  ensureDir(vaultDir);
   ensureDir(dataDir);
   ensureDir(cbmCacheDir);
   // Keep configured/published ports identical: the CBM UI rejects requests whose
   // Origin/Referer port doesn't match its own configured ui_port (403).
   configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort);
-  // Shares vaultDir with the backend's VaultManager, which reads it via process.env.
-  process.env.VAULT_PATH = vaultDir;
 
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');

@@ -1,23 +1,23 @@
 import { lmstudioClient } from './lmstudio';
-import { VaultManager } from './vaultManager';
+import { SiyuanClient } from './siyuanClient';
 
 export class LoopbackWorkflow {
-  private readonly vaultManager: VaultManager;
+  private readonly siyuanClient: SiyuanClient;
 
-  constructor(vaultManager: VaultManager) {
-    this.vaultManager = vaultManager;
+  constructor(siyuanClient: SiyuanClient) {
+    this.siyuanClient = siyuanClient;
   }
 
-  async executeTask(taskPath: string): Promise<string> {
+  async executeTask(docId: string): Promise<string> {
     try {
-      // 1. Read the task content from the vault
-      const content = await this.vaultManager.readNote(taskPath);
-      
+      // 1. Read the task content from SiYuan
+      const content = await this.siyuanClient.readDoc(docId);
+
       // 2. Send it to the LLM to execute
       // We use a specific system prompt for task execution
-      const systemPrompt = `You are a task execution agent. You have access to tools to interact with the vault and other local resources.
+      const systemPrompt = `You are a task execution agent. You have access to tools to interact with SiYuan Note and other local resources.
     Your goal is to complete the following task. 
-    After completion, update the vault task using 'lmstudio_update_vault_task' to mark it as done.
+    After completion, update the task using 'lmstudio_update_siyuan_task' to mark it as done.
     
     Task:
     ${content}`;
