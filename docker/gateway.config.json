@@ -11,8 +11,8 @@
       "id": "siyuan-note",
       "namespace": "siyuannote",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "siyuan-mcp@latest"],
+      "command": "node",
+      "args": ["/app/node_modules/siyuan-mcp/dist/index.js"],
       "env": {
         "SIYUAN_HOST": "siyuan",
         "SIYUAN_PORT": "6806"

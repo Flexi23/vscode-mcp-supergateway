@@ -2,4 +2,5 @@ dist/
 node_modules/
 vault/
 siyuan-workspace/
+gateway-data/
 .env

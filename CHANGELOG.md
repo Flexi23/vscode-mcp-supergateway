@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SiyuanClient` and the local docs now treat SiYuan auth as optional, so the stack can run without a placeholder or invalid API token while preserving opt-in token mode for real deployments.
 - Fixed the local SiYuan Docker startup to use the official kernel `serve` command instead of a shell wrapper, which prevents the `unknown command "sh" for "kernel"` restart loop; the bypass flag is now defined via `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true` for lock-screen-free local dev.
 - `gateway.ts` persists the CBM default workspace values (`default_path`, `selected_path`, `defaultPath`, `workspace_path`, `root_path`, `project_root`) to `/workspace`, so the graph UI opens on the mounted workspace instead of a stale empty state.
+- Fixed the stale gateway registration issue by wiring the SiYuan upstream to the direct Node entrypoint (`/app/node_modules/siyuan-mcp/dist/index.js`) and ignoring generated runtime state in `gateway-data/` so restarts no longer reload a dead admin config.
 
 ## [2.2.0] - 2026-08-16
 ### Changed
