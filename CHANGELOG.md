@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gateway.ts` now resets stale `gateway.db` / admin config state and stale `codebase-memory` daemon files before startup, keeps `CBM_CACHE_DIR` isolated and writable for the container, and discovers actual repo roots under `WORKSPACE_ROOT` instead of treating the whole monorepo as one project.
 - The `siyuan-note` upstream now supports local no-token operation: `SIYUAN_TOKEN_REQUIRED=false` disables the Authorization header entirely, while `SIYUAN_TOKEN` stays optional for dev mode and the lock-screen code remains under `SIYUAN_ACCESS_AUTH_CODE`.
 - `SiyuanClient` and the local docs now treat SiYuan auth as optional, so the stack can run without a placeholder or invalid API token while preserving opt-in token mode for real deployments.
+- Fixed the local SiYuan Docker startup to use the official kernel `serve` command instead of a shell wrapper, which prevents the `unknown command "sh" for "kernel"` restart loop; the bypass flag is now defined via `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true` for lock-screen-free local dev.
+- `gateway.ts` persists the CBM default workspace values (`default_path`, `selected_path`, `defaultPath`, `workspace_path`, `root_path`, `project_root`) to `/workspace`, so the graph UI opens on the mounted workspace instead of a stale empty state.
 
 ## [2.2.0] - 2026-08-16
 ### Changed

@@ -11,8 +11,11 @@ services:
     environment:
       GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
       LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
+      WORKSPACE_ROOT: /workspace
       BACKEND_PORT: "8081"
       CBM_UI_PORT: "9749"
+      CBM_DEFAULT_PATH: /workspace
+      CBM_AUTO_INDEX_PATH: /workspace
       CBM_CACHE_DIR: /root/cbm-cache
       SIYUAN_TOKEN: ${SIYUAN_TOKEN:-}
       SIYUAN_TOKEN_REQUIRED: ${SIYUAN_TOKEN_REQUIRED:-false}
@@ -27,7 +30,10 @@ services:
 
   siyuan:
     image: b3log/siyuan
-    command: ["serve", "--workspace=/siyuan/workspace/", "--accessAuthCode=${SIYUAN_ACCESS_AUTH_CODE}"]
+    command: ["serve", "--workspace=/siyuan/workspace/"]
+    environment:
+      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE:-}
+      SIYUAN_ACCESS_AUTH_CODE_BYPASS: ${SIYUAN_ACCESS_AUTH_CODE_BYPASS:-true}
     ports:
       - "6806:6806"
     volumes:

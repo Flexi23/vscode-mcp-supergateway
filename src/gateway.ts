@@ -27,6 +27,7 @@ const adminPort = Number(process.env.MCP_GATEWAY_ADMIN_PORT || 3100);
 const publicPort = Number(process.env.MCP_GATEWAY_PUBLIC_PORT || 8080);
 const cbmUiPort = Number(process.env.CBM_UI_PORT || 9749);
 const cbmCacheDir = process.env.CBM_CACHE_DIR || '/root/cbm-cache';
+const cbmDefaultPath = process.env.CBM_DEFAULT_PATH || process.env.WORKSPACE_ROOT || '/workspace';
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -195,12 +196,14 @@ function getContainerAddress(): string {
 // Standalone graph-visualization server, sharing CBM_CACHE_DIR with the stdio
 // upstream so it shows the same indexed projects; the coordination daemon
 // dedupes this against the MCP upstream's own session instead of double-serving.
-function configureCodebaseMemoryUi(cacheDir: string, port: number) {
+function configureCodebaseMemoryUi(cacheDir: string, port: number, defaultPath: string = '/workspace') {
   // ui_enabled/ui_port live in CBM_CACHE_DIR/config.json (not the `config set` store).
   // Writing it before the codebase-memory upstream's stdio session starts its
   // coordination daemon makes that daemon serve the graph UI on this port —
   // running a second `--ui=true` CLI invocation just starts/stops its own stdio
   // session immediately (EOF on stdin) without leaving anything listening.
+  // Persist the default workspace root as well so the start page opens at the
+  // container's mounted workspace instead of an empty or stale state.
   const configPath = path.join(cacheDir, 'config.json');
   let existing: Record<string, unknown> = {};
   try {
@@ -208,7 +211,18 @@ function configureCodebaseMemoryUi(cacheDir: string, port: number) {
   } catch {
     // no existing config yet
   }
-  fs.writeFileSync(configPath, JSON.stringify({ ...existing, ui_enabled: true, ui_port: port }, null, 2));
+  const nextConfig = {
+    ...existing,
+    ui_enabled: true,
+    ui_port: port,
+    default_path: defaultPath,
+    selected_path: defaultPath,
+    defaultPath: defaultPath,
+    workspace_path: defaultPath,
+    root_path: defaultPath,
+    project_root: defaultPath,
+  };
+  fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2));
 }
 
 // Auto-indexes the actual project folders under the mounted WORKSPACE_ROOT
@@ -316,17 +330,17 @@ function main() {
   cleanupStaleCodebaseMemoryDaemon();
   // Keep configured/published ports identical: the CBM UI rejects requests whose
   // Origin/Referer port doesn't match its own configured ui_port (403).
-  configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort);
+  configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort, cbmDefaultPath);
 
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
   fs.writeFileSync(adminConfigPath, JSON.stringify(adminConfig, null, 2));
 
+  const runtimeWorkspaceRoot = process.env.WORKSPACE_ROOT || '/workspace';
   const enableStartupAutoIndex = process.env.CBM_AUTO_INDEX_ENABLED === 'true';
-  if (enableStartupAutoIndex && process.env.CBM_AUTO_INDEX_PATH) {
-    autoIndexCodebaseMemory(cbmCacheDir, process.env.CBM_AUTO_INDEX_PATH);
-  } else if (enableStartupAutoIndex && process.env.WORKSPACE_ROOT) {
-    autoIndexCodebaseMemory(cbmCacheDir, process.env.WORKSPACE_ROOT);
+  const startupIndexPath = process.env.CBM_AUTO_INDEX_PATH || runtimeWorkspaceRoot;
+  if (enableStartupAutoIndex && startupIndexPath) {
+    autoIndexCodebaseMemory(cbmCacheDir, startupIndexPath);
   } else {
     console.log('[codebase-memory] startup auto-index is disabled; run index_repository manually for the first project index.');
   }
