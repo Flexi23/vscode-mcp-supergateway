@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- Added a C# semantic dependency resolver module that uses VS Code's `executeDocumentSymbolProvider`, `executeReferenceProvider`, and `executeDefinitionProvider` to build graph edges across indexed C# files, with batched execution and deduplication so the LSP doesn't flood the extension host.
+- Documented the new C# graph resolver as a dedicated subproc between the MSP Stack and the Agent Tasks in the architecture diagram.
+
 ## [2.2.0] - 2026-08-16
 ### Changed
 - **Breaking:** `.env`'s `SIYUAN_WORKSPACE_DIR` is replaced by `WORKSPACE_ROOT`, an absolute host path to the workspace root. `docker-compose.yml` derives both the `siyuan` service's workspace bind mount (`${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace`) and a new read-only `gateway` mount (`${WORKSPACE_ROOT}:/workspace/root:ro`) from it, so only one variable needs to be set.

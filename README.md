@@ -32,8 +32,9 @@ graph LR
         subgraph Docker["🐳 Docker Compose"]
             Supergateway["Supergateway MCP Server"]
 
-            Loopback@{ shape: subproc, label: "Agent Tasks<br/>(loopback API :8081)" }
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
+            EdgeResolver@{ shape: subproc, label: "C# Semantic Edge Resolver<br/>(VS Code C# LSP / graph links)" }
+            Loopback@{ shape: subproc, label: "Agent Tasks<br/>(loopback API :8081)" }
             MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
             SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
@@ -45,6 +46,8 @@ graph LR
 
     Supergateway --> |forward proxy| Proxy
     Supergateway --> |scheduler| Loopback
+    Proxy --> |semantic graph edges| EdgeResolver
+    EdgeResolver --> |C# code links -> node edges| Loopback
     Loopback <-. reads & updates .-> SiYuanNote
     Supergateway --> |provider|MCP
 
@@ -193,6 +196,7 @@ Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.js
 
 - **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
+- **C# Semantic Edge Resolver:** Resolve cross-file C# dependencies in the VS Code C# language service and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
 - **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 
