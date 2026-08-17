@@ -1,5 +1,14 @@
+import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import type * as VSCode from 'vscode';
+
+const vscodeModule: typeof import('vscode') | undefined = (() => {
+  try {
+    return require('vscode');
+  } catch {
+    return undefined;
+  }
+})();
 
 export interface GraphLink {
   source: string;
@@ -7,13 +16,16 @@ export interface GraphLink {
   weight: number;
 }
 
-type SymbolLike = vscode.SymbolInformation | vscode.DocumentSymbol;
+type GraphUri = { fsPath: string; toString(): string };
+type PositionLike = { line: number; character: number };
+type SymbolLike = { selectionRange?: { start: PositionLike }; range?: { start: PositionLike }; children?: SymbolLike[]; name?: string };
+type ReferenceLike = { uri?: GraphUri; range?: { start: PositionLike }; targetUri?: GraphUri; targetRange?: { start: PositionLike } };
 
 export class CsharpDependencyExtractor {
   private readonly concurrencyLimit = 4;
   private readonly batchSize = 8;
 
-  constructor(private readonly workspaceRoot: string = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '') {}
+  constructor(private readonly workspaceRoot: string = this.getWorkspaceRoot()) {}
 
   /**
    * Extracts cross-file dependencies for a batch of C# file URIs.
@@ -23,7 +35,7 @@ export class CsharpDependencyExtractor {
    * uses internally. The result is a graph link list that can be fed directly into
    * the codebase-memory indexer.
    */
-  async extractEdges(nodes: vscode.Uri[]): Promise<GraphLink[]> {
+  async extractEdges(nodes: GraphUri[]): Promise<GraphLink[]> {
     const uniqueNodes = this.dedupeNodes(nodes);
     if (uniqueNodes.length === 0) {
       return [];
@@ -31,7 +43,7 @@ export class CsharpDependencyExtractor {
 
     if (!this.isCSharpExtensionReady()) {
       console.warn('[CsharpDependencyExtractor] C# extension is not active or not ready yet.');
-      return [];
+      return this.extractEdgesFromFilesystem(this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes));
     }
 
     const edges = new Map<string, Set<string>>();
@@ -66,11 +78,23 @@ export class CsharpDependencyExtractor {
   }
 
   /**
+   * Serializes the extracted links into the JSON artifact format expected by the
+   * codebase-memory graph import pipeline. The file is intentionally simple so it
+   * can be consumed by downstream tooling without requiring a local DB schema.
+   */
+  writeLinksFile(links: GraphLink[], outputPath: string): number {
+    const normalized = this.dedupeLinks(links);
+    const payload = JSON.stringify(normalized, null, 2);
+    fs.writeFileSync(outputPath, payload, 'utf8');
+    return normalized.length;
+  }
+
+  /**
    * Queries the active C# language server for every symbol in a file and follows
    * the symbol's references to other files. This is the main semantic dependency
    * extraction step and mirrors the way Roslyn resolves cross-file type usage.
    */
-  private async extractLinksForFile(uri: vscode.Uri): Promise<GraphLink[]> {
+  private async extractLinksForFile(uri: GraphUri): Promise<GraphLink[]> {
     const sourcePath = this.toGraphPath(uri);
     const links = new Map<string, GraphLink>();
     const symbols = await this.getSymbolsForFile(uri);
@@ -123,8 +147,12 @@ export class CsharpDependencyExtractor {
     return Array.from(links.values());
   }
 
-  private async getSymbolsForFile(uri: vscode.Uri): Promise<SymbolLike[]> {
-    const result = await vscode.commands.executeCommand<unknown>(
+  private async getSymbolsForFile(uri: GraphUri): Promise<SymbolLike[]> {
+    if (!vscodeModule) {
+      return [];
+    }
+
+    const result = await vscodeModule.commands.executeCommand<unknown>(
       'vscode.executeDocumentSymbolProvider',
       uri,
     );
@@ -137,8 +165,12 @@ export class CsharpDependencyExtractor {
     return this.flattenSymbols(rawSymbols as SymbolLike[]);
   }
 
-  private async queryReferences(uri: vscode.Uri, position: vscode.Position): Promise<vscode.Location[]> {
-    const result = await vscode.commands.executeCommand<vscode.Location[] | undefined>(
+  private async queryReferences(uri: GraphUri, position: PositionLike): Promise<ReferenceLike[]> {
+    if (!vscodeModule) {
+      return [];
+    }
+
+    const result = await vscodeModule.commands.executeCommand<ReferenceLike[] | undefined>(
       'vscode.executeReferenceProvider',
       uri,
       position,
@@ -147,32 +179,26 @@ export class CsharpDependencyExtractor {
     return result ?? [];
   }
 
-  private async queryDefinitions(uri: vscode.Uri, position: vscode.Position): Promise<Array<vscode.Location | vscode.LocationLink>> {
-    const result = await vscode.commands.executeCommand<vscode.Location[] | vscode.LocationLink[] | undefined>(
+  private async queryDefinitions(uri: GraphUri, position: PositionLike): Promise<ReferenceLike[]> {
+    if (!vscodeModule) {
+      return [];
+    }
+
+    const result = await vscodeModule.commands.executeCommand<ReferenceLike[] | undefined>(
       'vscode.executeDefinitionProvider',
       uri,
       position,
     );
 
-    if (!result) {
-      return [];
-    }
-
-    return result.map((entry) => {
-      if ('uri' in entry) {
-        return entry as vscode.Location;
-      }
-
-      return entry as vscode.LocationLink;
-    });
+    return result ?? [];
   }
 
   private flattenSymbols(symbols: readonly SymbolLike[]): SymbolLike[] {
     const result: SymbolLike[] = [];
 
     for (const symbol of symbols) {
-      if ('children' in symbol && symbol.children) {
-        result.push(symbol, ...this.flattenSymbols(symbol.children as SymbolLike[]));
+      if (symbol.children && symbol.children.length > 0) {
+        result.push(symbol, ...this.flattenSymbols(symbol.children));
       } else {
         result.push(symbol);
       }
@@ -181,19 +207,19 @@ export class CsharpDependencyExtractor {
     return result;
   }
 
-  private getSymbolPosition(symbol: SymbolLike): vscode.Position | undefined {
-    if ('selectionRange' in symbol && symbol.selectionRange) {
+  private getSymbolPosition(symbol: SymbolLike): PositionLike | undefined {
+    if (symbol.selectionRange) {
       return symbol.selectionRange.start;
     }
 
-    if ('range' in symbol && symbol.range) {
+    if (symbol.range) {
       return symbol.range.start;
     }
 
     return undefined;
   }
 
-  private toGraphPath(uri: vscode.Uri): string {
+  private toGraphPath(uri: GraphUri): string {
     if (this.workspaceRoot) {
       const relative = path.relative(this.workspaceRoot, uri.fsPath).replace(/\\/g, '/');
       if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
@@ -204,15 +230,30 @@ export class CsharpDependencyExtractor {
     return path.basename(uri.fsPath);
   }
 
-  private dedupeNodes(nodes: readonly vscode.Uri[]): vscode.Uri[] {
+  private dedupeNodes(nodes: readonly GraphUri[]): GraphUri[] {
     const seen = new Set<string>();
-    const unique: vscode.Uri[] = [];
+    const unique: GraphUri[] = [];
 
     for (const node of nodes) {
       const key = node.toString();
       if (!seen.has(key)) {
         seen.add(key);
         unique.push(node);
+      }
+    }
+
+    return unique;
+  }
+
+  private dedupeLinks(links: readonly GraphLink[]): GraphLink[] {
+    const seen = new Set<string>();
+    const unique: GraphLink[] = [];
+
+    for (const link of links) {
+      const key = `${link.source}\u0000${link.target}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push({ ...link, weight: Math.max(1, link.weight || 1) });
       }
     }
 
@@ -228,15 +269,109 @@ export class CsharpDependencyExtractor {
   }
 
   private isCSharpExtensionReady(): boolean {
-    const csharp = vscode.extensions.getExtension('ms-dotnettools.csharp');
-    const csdevkit = vscode.extensions.getExtension('ms-dotnettools.csdevkit');
+    if (!vscodeModule) {
+      return false;
+    }
+
+    const csharp = vscodeModule.extensions.getExtension('ms-dotnettools.csharp');
+    const csdevkit = vscodeModule.extensions.getExtension('ms-dotnettools.csdevkit');
     const ready = !!(csharp?.isActive || csdevkit?.isActive);
-    const hasCSharpFiles = vscode.workspace.textDocuments.some((document: vscode.TextDocument) => document.languageId === 'csharp')
-      || !!vscode.workspace.workspaceFolders?.some((folder: vscode.WorkspaceFolder) => {
+    const hasCSharpFiles = vscodeModule.workspace.textDocuments.some((document: { languageId: string }) => document.languageId === 'csharp')
+      || !!vscodeModule.workspace.workspaceFolders?.some((folder: { uri: { fsPath: string } }) => {
           const pathToFile = folder.uri.fsPath;
           return pathToFile.length > 0;
         });
 
     return ready && hasCSharpFiles;
+  }
+
+  private getWorkspaceRoot(): string {
+    if (!vscodeModule || !vscodeModule.workspace.workspaceFolders?.length) {
+      return '';
+    }
+    return vscodeModule.workspace.workspaceFolders[0].uri.fsPath;
+  }
+
+  private getDefaultRepositoryRoot(nodes: readonly GraphUri[]): string {
+    if (nodes.length === 0) {
+      return '';
+    }
+    const root = nodes[0].fsPath;
+    const parent = path.dirname(root);
+    return parent;
+  }
+
+  collectCSharpFiles(rootDir: string): GraphUri[] {
+    if (!rootDir || !fs.existsSync(rootDir)) {
+      return [];
+    }
+
+    const results: GraphUri[] = [];
+    const stack = [rootDir];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || !fs.existsSync(current)) {
+        continue;
+      }
+
+      const stat = fs.statSync(current);
+      if (stat.isDirectory()) {
+        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+          const fullPath = path.join(current, entry.name);
+          if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'bin' || entry.name === 'obj' || entry.name === 'dist') {
+            continue;
+          }
+          stack.push(fullPath);
+        }
+        continue;
+      }
+
+      if (current.endsWith('.cs') && fs.existsSync(current)) {
+        results.push({ fsPath: current, toString: () => `file://${current}` });
+      }
+    }
+
+    return results;
+  }
+
+  async extractEdgesFromFilesystem(rootDir: string): Promise<GraphLink[]> {
+    const files = this.collectCSharpFiles(rootDir);
+    if (files.length === 0) {
+      return [];
+    }
+
+    const links = new Map<string, GraphLink>();
+    for (const file of files) {
+      const fileLinks = await this.extractLinksFromRawFile(file.fsPath);
+      for (const link of fileLinks) {
+        const key = `${link.source}\u0000${link.target}`;
+        if (!links.has(key)) {
+          links.set(key, link);
+        }
+      }
+    }
+
+    return Array.from(links.values());
+  }
+
+  private async extractLinksFromRawFile(filePath: string): Promise<GraphLink[]> {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const fileLinks: GraphLink[] = [];
+    const importPattern = /(?:using\s+)(?:[A-Za-z_][\w.]*\s*;|\(.*?\))/g;
+    const matches = [...content.matchAll(importPattern)];
+    const source = this.toGraphPath({ fsPath: filePath, toString: () => filePath });
+
+    const targets = matches.map((match) => match[0].replace(/using\s+|;|\s+/g, '').replace(/[()]/g, ''))
+      .filter(Boolean)
+      .map((name) => name.replace(/\.$/, ''));
+
+    for (const target of targets) {
+      const targetPath = target.replace(/\./g, '/');
+      const link: GraphLink = { source, target: targetPath, weight: 1 };
+      fileLinks.push(link);
+    }
+
+    return fileLinks.filter((link) => link.source !== link.target);
   }
 }

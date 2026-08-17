@@ -7,6 +7,7 @@ import path from 'path';
 import http from 'http';
 import os from 'os';
 import { startBackendServer } from './server';
+import { CsharpDependencyExtractor } from './services/csharpDependencyExtractor';
 
 interface UpstreamConfig {
   id: string;
@@ -152,15 +153,60 @@ function autoIndexCodebaseMemory(cacheDir: string, repoPath: string) {
     console.warn(`[codebase-memory] auto-index skipped, path not found: ${repoPath}`);
     return;
   }
+
   console.log(`[codebase-memory] auto-indexing ${repoPath} in background...`);
   const child = spawn(
     'npx',
     ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', JSON.stringify({ repo_path: repoPath })],
     { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
   );
-  child.on('exit', (code) => {
-    if (code === 0) console.log('[codebase-memory] auto-index completed');
-    else console.warn(`[codebase-memory] auto-index exited with code ${code}`);
+
+  child.on('exit', async (code) => {
+    if (code === 0) {
+      console.log('[codebase-memory] auto-index completed');
+      try {
+        await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
+      } catch (error) {
+        console.warn('[codebase-memory] C# edge enrichment failed:', error);
+      }
+      return;
+    }
+
+    console.warn(`[codebase-memory] auto-index exited with code ${code}`);
+  });
+}
+
+async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: string) {
+  const extractor = new CsharpDependencyExtractor(repoPath);
+  const files = extractor.collectCSharpFiles(repoPath);
+
+  if (files.length === 0) {
+    console.log('[codebase-memory] no C# files found for edge enrichment');
+    return;
+  }
+
+  const graphLinks = await extractor.extractEdges(files);
+  if (graphLinks.length === 0) {
+    console.log('[codebase-memory] no C# graph links produced');
+    return;
+  }
+
+  const projectName = path.basename(repoPath) || 'workspace';
+  const linksFile = path.join(cacheDir, 'csharp-edges.json');
+  extractor.writeLinksFile(graphLinks, linksFile);
+
+  const child = spawn(
+    'npx',
+    ['-y', 'codebase-memory-mcp', 'cli', 'ingest_traces', '--project', projectName, '--traces', JSON.stringify(graphLinks)],
+    { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
+  );
+
+  child.on('exit', (exitCode) => {
+    if (exitCode === 0) {
+      console.log(`[codebase-memory] injected ${graphLinks.length} C# graph links into project ${projectName}`);
+      return;
+    }
+    console.warn(`[codebase-memory] ingest_traces exited with code ${exitCode}`);
   });
 }
 
