@@ -13,12 +13,16 @@ export class SiyuanClient {
   }
 
   private async call<T>(endpoint: string, body: Record<string, unknown> = {}): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.token) {
+      headers.Authorization = `Token ${this.token}`;
+    }
+
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Token ${this.token}`,
-      },
+      headers,
       body: JSON.stringify(body),
     });
     const json = (await response.json()) as { code: number; msg?: string; data: T };

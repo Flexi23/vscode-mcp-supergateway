@@ -35,7 +35,7 @@ export class CsharpDependencyExtractor {
    * uses internally. The result is a graph link list that can be fed directly into
    * the codebase-memory indexer.
    */
-  async extractEdges(nodes: GraphUri[]): Promise<GraphLink[]> {
+  async extractEdges(nodes: GraphUri[], onProgress?: (message: string, percent: number, processed: number, total: number) => void): Promise<GraphLink[]> {
     const uniqueNodes = this.dedupeNodes(nodes);
     if (uniqueNodes.length === 0) {
       return [];
@@ -43,12 +43,14 @@ export class CsharpDependencyExtractor {
 
     if (!this.isCSharpExtensionReady()) {
       console.warn('[CsharpDependencyExtractor] C# extension is not active or not ready yet.');
-      return this.extractEdgesFromFilesystem(this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes));
+      return this.extractEdgesFromFilesystem(this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes), onProgress);
     }
 
     const edges = new Map<string, Set<string>>();
+    const total = uniqueNodes.length;
 
-    for (const batch of this.chunk(uniqueNodes, this.batchSize)) {
+    for (let index = 0; index < uniqueNodes.length; index += this.batchSize) {
+      const batch = uniqueNodes.slice(index, index + this.batchSize);
       const batchResults = await Promise.all(
         batch.map((uri) => this.extractLinksForFile(uri).catch((error) => {
           console.error(`[CsharpDependencyExtractor] Failed to process ${uri.fsPath}:`, error);
@@ -65,6 +67,10 @@ export class CsharpDependencyExtractor {
           edges.get(key)!.add(link.target);
         }
       }
+
+      const processed = Math.min(index + batch.length, total);
+      const percent = Math.round((processed / total) * 100);
+      onProgress?.(`[CsharpDependencyExtractor] processing C# dependency graph: ${processed}/${total} files (${percent}%)`, percent, processed, total);
     }
 
     return Array.from(edges.entries()).map(([key, targets]) => {
@@ -335,14 +341,16 @@ export class CsharpDependencyExtractor {
     return results;
   }
 
-  async extractEdgesFromFilesystem(rootDir: string): Promise<GraphLink[]> {
+  async extractEdgesFromFilesystem(rootDir: string, onProgress?: (message: string, percent: number, processed: number, total: number) => void): Promise<GraphLink[]> {
     const files = this.collectCSharpFiles(rootDir);
     if (files.length === 0) {
       return [];
     }
 
     const links = new Map<string, GraphLink>();
-    for (const file of files) {
+    const total = files.length;
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
       const fileLinks = await this.extractLinksFromRawFile(file.fsPath);
       for (const link of fileLinks) {
         const key = `${link.source}\u0000${link.target}`;
@@ -350,6 +358,9 @@ export class CsharpDependencyExtractor {
           links.set(key, link);
         }
       }
+
+      const percent = Math.round(((index + 1) / total) * 100);
+      onProgress?.(`[CsharpDependencyExtractor] processing raw C# files: ${index + 1}/${total} (${percent}%)`, percent, index + 1, total);
     }
 
     return Array.from(links.values());

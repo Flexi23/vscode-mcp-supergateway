@@ -26,22 +26,90 @@ const dataDir = process.env.GATEWAY_DATA_DIR || '/app/data';
 const adminPort = Number(process.env.MCP_GATEWAY_ADMIN_PORT || 3100);
 const publicPort = Number(process.env.MCP_GATEWAY_PUBLIC_PORT || 8080);
 const cbmUiPort = Number(process.env.CBM_UI_PORT || 9749);
-const cbmCacheDir = path.join(dataDir, 'cbm-cache');
+const cbmCacheDir = process.env.CBM_CACHE_DIR || '/root/cbm-cache';
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
+  try {
+    fs.chmodSync(dir, 0o700);
+  } catch {
+    // Some mounts may reject chmod; ignore, the important thing is the exact
+    // path stays private and root-owned in the container.
+  }
+}
+
+function resetGatewayPersistentState() {
+  const staleFiles = ['gateway.db', 'gateway.db-shm', 'gateway.db-wal', 'admin-gateway-config.json'];
+  let removed = 0;
+
+  for (const fileName of staleFiles) {
+    const filePath = path.join(dataDir, fileName);
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true, recursive: true });
+      removed += 1;
+      console.log(`[gateway] removed stale gateway state: ${fileName}`);
+    }
+  }
+
+  const cbmCachePath = path.join(dataDir, 'cbm-cache');
+  if (fs.existsSync(cbmCachePath)) {
+    fs.rmSync(cbmCachePath, { force: true, recursive: true });
+    removed += 1;
+    console.log(`[gateway] removed stale cbm cache: ${cbmCachePath}`);
+  }
+
+  if (removed > 0) {
+    console.log(`[gateway] reset persisted gateway state (${removed} item(s)) so the current config is reloaded from scratch.`);
+  }
+}
+
+function cleanupStaleCodebaseMemoryDaemon() {
+  try {
+    const tmpRoot = '/tmp';
+    if (!fs.existsSync(tmpRoot)) {
+      return;
+    }
+
+    const entries = fs.readdirSync(tmpRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.name.startsWith('cbm-daemon-')) {
+        continue;
+      }
+
+      const target = path.join(tmpRoot, entry.name);
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+        console.log(`[codebase-memory] cleaned stale daemon state at ${target}`);
+      } catch (error) {
+        console.warn(`[codebase-memory] failed to remove stale daemon state at ${target}:`, error);
+      }
+    }
+  } catch (error) {
+    console.warn('[codebase-memory] failed to inspect stale daemon state:', error);
+  }
 }
 
 function buildAdminConfig(): GatewayConfig {
   const configPath = path.join(__dirname, '..', 'docker', 'gateway.config.json');
   const config: GatewayConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  const siYuanTokenRequired = String(process.env.SIYUAN_TOKEN_REQUIRED ?? 'false').toLowerCase() === 'true';
 
   for (const upstream of config.upstreams) {
     if (upstream.id === 'gitlab' && process.env.GITLAB_PERSONAL_ACCESS_TOKEN) {
       upstream.env = { ...upstream.env, GITLAB_PERSONAL_ACCESS_TOKEN: process.env.GITLAB_PERSONAL_ACCESS_TOKEN };
     }
-    if (upstream.id === 'siyuan-note' && process.env.SIYUAN_TOKEN) {
-      upstream.env = { ...upstream.env, SIYUAN_TOKEN: process.env.SIYUAN_TOKEN };
+    if (upstream.id === 'siyuan-note') {
+      const siYuanToken = process.env.SIYUAN_TOKEN || '';
+      upstream.env = {
+        ...upstream.env,
+        SIYUAN_HOST: 'siyuan',
+        SIYUAN_PORT: '6806',
+        SIYUAN_TOKEN: siYuanToken,
+        SIYUAN_TOKEN_REQUIRED: String(siYuanTokenRequired),
+      };
+      if (siYuanTokenRequired && (!siYuanToken || ['Supergateway', 'siyuan_api_token_here', 'your-api-token-here'].includes(siYuanToken))) {
+        console.warn('[siyuan-note] SIYUAN_TOKEN_REQUIRED=true but the token is empty or placeholder. Set the real API token from SiYuan: Settings -> About -> API Token.');
+      }
     }
     if (upstream.id === 'codebase-memory') {
       upstream.env = { ...upstream.env, CBM_CACHE_DIR: cbmCacheDir };
@@ -143,36 +211,61 @@ function configureCodebaseMemoryUi(cacheDir: string, port: number) {
   fs.writeFileSync(configPath, JSON.stringify({ ...existing, ui_enabled: true, ui_port: port }, null, 2));
 }
 
-// Auto-indexes CBM_AUTO_INDEX_PATH (the mounted WORKSPACE_ROOT, see docker-compose.yml)
-// on startup, since codebase-memory-mcp otherwise requires a manual "Index this
-// project" tool call per session. Runs detached/non-blocking so a large first
-// index (can take minutes on a big monorepo) doesn't delay the gateway/proxy
-// from coming up.
-function autoIndexCodebaseMemory(cacheDir: string, repoPath: string) {
-  if (!fs.existsSync(repoPath)) {
-    console.warn(`[codebase-memory] auto-index skipped, path not found: ${repoPath}`);
+// Auto-indexes the actual project folders under the mounted WORKSPACE_ROOT
+// instead of treating the whole monorepo as one single repo. Codebase Memory
+// shows project folders on its start page when each repository is indexed
+// individually.
+function discoverProjectRoots(workspaceRoot: string): string[] {
+  if (!fs.existsSync(workspaceRoot)) {
+    return [];
+  }
+
+  const entries = fs.readdirSync(workspaceRoot, { withFileTypes: true });
+  const roots = entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(workspaceRoot, entry.name))
+    .filter((candidate) => {
+      const gitDir = path.join(candidate, '.git');
+      const agentFile = path.join(candidate, 'AGENT.md');
+      const readmeFile = path.join(candidate, 'README.md');
+      const packageJson = path.join(candidate, 'package.json');
+      return fs.existsSync(gitDir) || fs.existsSync(agentFile) || fs.existsSync(readmeFile) || fs.existsSync(packageJson);
+    })
+    .sort();
+
+  return roots.length > 0 ? roots : [workspaceRoot];
+}
+
+function autoIndexCodebaseMemory(cacheDir: string, workspaceRoot: string) {
+  if (!fs.existsSync(workspaceRoot)) {
+    console.warn(`[codebase-memory] auto-index skipped, path not found: ${workspaceRoot}`);
     return;
   }
 
-  console.log(`[codebase-memory] auto-indexing ${repoPath} in background...`);
-  const child = spawn(
-    'npx',
-    ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', JSON.stringify({ repo_path: repoPath })],
-    { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
-  );
+  const repoPaths = discoverProjectRoots(workspaceRoot);
+  console.log(`[codebase-memory] auto-indexing ${repoPaths.length} project root(s) under ${workspaceRoot}...`);
 
-  child.on('exit', async (code) => {
-    if (code === 0) {
-      console.log('[codebase-memory] auto-index completed');
-      try {
-        await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
-      } catch (error) {
-        console.warn('[codebase-memory] C# edge enrichment failed:', error);
+  repoPaths.forEach((repoPath, index) => {
+    const projectName = path.basename(repoPath) || 'workspace';
+    const child = spawn(
+      'npx',
+      ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', '--repo-path', repoPath, '--name', projectName, '--mode', 'moderate'],
+      { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
+    );
+
+    child.on('exit', async (code) => {
+      if (code === 0) {
+        console.log(`[codebase-memory] auto-index completed for ${repoPath} (${index + 1}/${repoPaths.length})`);
+        try {
+          await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
+        } catch (error) {
+          console.warn(`[codebase-memory] C# edge enrichment failed for ${repoPath}:`, error);
+        }
+        return;
       }
-      return;
-    }
 
-    console.warn(`[codebase-memory] auto-index exited with code ${code}`);
+      console.warn(`[codebase-memory] auto-index exited for ${repoPath} with code ${code}`);
+    });
   });
 }
 
@@ -185,7 +278,12 @@ async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: s
     return;
   }
 
-  const graphLinks = await extractor.extractEdges(files);
+  console.log(`[codebase-memory] starting C# edge enrichment for ${path.basename(repoPath)} (${files.length} files)...`);
+
+  const graphLinks = await extractor.extractEdges(files, (message, percent) => {
+    console.log(`[codebase-memory] ${message} [${percent}%]`);
+  });
+
   if (graphLinks.length === 0) {
     console.log('[codebase-memory] no C# graph links produced');
     return;
@@ -195,6 +293,7 @@ async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: s
   const linksFile = path.join(cacheDir, 'csharp-edges.json');
   extractor.writeLinksFile(graphLinks, linksFile);
 
+  console.log(`[codebase-memory] ingesting ${graphLinks.length} C# graph links into project ${projectName}...`);
   const child = spawn(
     'npx',
     ['-y', 'codebase-memory-mcp', 'cli', 'ingest_traces', '--project', projectName, '--traces', JSON.stringify(graphLinks)],
@@ -213,6 +312,8 @@ async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: s
 function main() {
   ensureDir(dataDir);
   ensureDir(cbmCacheDir);
+  resetGatewayPersistentState();
+  cleanupStaleCodebaseMemoryDaemon();
   // Keep configured/published ports identical: the CBM UI rejects requests whose
   // Origin/Referer port doesn't match its own configured ui_port (403).
   configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort);
@@ -221,8 +322,13 @@ function main() {
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
   fs.writeFileSync(adminConfigPath, JSON.stringify(adminConfig, null, 2));
 
-  if (process.env.CBM_AUTO_INDEX_PATH) {
+  const enableStartupAutoIndex = process.env.CBM_AUTO_INDEX_ENABLED === 'true';
+  if (enableStartupAutoIndex && process.env.CBM_AUTO_INDEX_PATH) {
     autoIndexCodebaseMemory(cbmCacheDir, process.env.CBM_AUTO_INDEX_PATH);
+  } else if (enableStartupAutoIndex && process.env.WORKSPACE_ROOT) {
+    autoIndexCodebaseMemory(cbmCacheDir, process.env.WORKSPACE_ROOT);
+  } else {
+    console.log('[codebase-memory] startup auto-index is disabled; run index_repository manually for the first project index.');
   }
 
   const dbPath = path.join(dataDir, 'gateway.db');

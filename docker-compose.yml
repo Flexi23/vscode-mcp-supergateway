@@ -13,12 +13,14 @@ services:
       LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
       BACKEND_PORT: "8081"
       CBM_UI_PORT: "9749"
-      SIYUAN_TOKEN: ${SIYUAN_TOKEN}
-      # codebase-memory auto-indexes this mounted path on startup (see gateway.ts).
-      CBM_AUTO_INDEX_PATH: /workspace/root
+      CBM_CACHE_DIR: /root/cbm-cache
+      SIYUAN_TOKEN: ${SIYUAN_TOKEN:-}
+      SIYUAN_TOKEN_REQUIRED: ${SIYUAN_TOKEN_REQUIRED:-false}
+      # Start with a manual first index; startup auto-index is intentionally off.
+      CBM_AUTO_INDEX_ENABLED: "false"
     volumes:
-      - gateway-data:/app/data
-      - ${WORKSPACE_ROOT}:/workspace/root:ro
+      - ./gateway-data:/app/data
+      - ${WORKSPACE_ROOT}:/workspace:ro
     restart: unless-stopped
     depends_on:
       - siyuan
@@ -33,5 +35,3 @@ services:
       - ${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace:/siyuan/workspace
     restart: unless-stopped
 
-volumes:
-  gateway-data:

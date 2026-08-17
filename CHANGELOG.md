@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a C# semantic dependency resolver module that uses VS Code's `executeDocumentSymbolProvider`, `executeReferenceProvider`, and `executeDefinitionProvider` to build graph edges across indexed C# files, with batched execution and deduplication so the LSP doesn't flood the extension host.
 - Documented the new C# graph resolver as a dedicated subproc between the MSP Stack and the Agent Tasks in the architecture diagram.
 
+### Changed
+- `gateway.ts` now resets stale `gateway.db` / admin config state and stale `codebase-memory` daemon files before startup, keeps `CBM_CACHE_DIR` isolated and writable for the container, and discovers actual repo roots under `WORKSPACE_ROOT` instead of treating the whole monorepo as one project.
+- The `siyuan-note` upstream now supports local no-token operation: `SIYUAN_TOKEN_REQUIRED=false` disables the Authorization header entirely, while `SIYUAN_TOKEN` stays optional for dev mode and the lock-screen code remains under `SIYUAN_ACCESS_AUTH_CODE`.
+- `SiyuanClient` and the local docs now treat SiYuan auth as optional, so the stack can run without a placeholder or invalid API token while preserving opt-in token mode for real deployments.
+
 ## [2.2.0] - 2026-08-16
 ### Changed
 - **Breaking:** `.env`'s `SIYUAN_WORKSPACE_DIR` is replaced by `WORKSPACE_ROOT`, an absolute host path to the workspace root. `docker-compose.yml` derives both the `siyuan` service's workspace bind mount (`${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace`) and a new read-only `gateway` mount (`${WORKSPACE_ROOT}:/workspace/root:ro`) from it, so only one variable needs to be set.
