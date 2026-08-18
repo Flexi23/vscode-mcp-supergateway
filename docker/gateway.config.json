@@ -8,6 +8,17 @@
       "args": ["-y", "codebase-memory-mcp"]
     },
     {
+      "id": "csharp-semantic",
+      "namespace": "csharpsemantic",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["/app/dist/csharpSemanticMcp.js"],
+      "env": {
+        "WORKSPACE_ROOT": "/workspace",
+        "CBM_DEFAULT_PATH": "/workspace"
+      }
+    },
+    {
       "id": "siyuan-note",
       "namespace": "siyuannote",
       "transport": "stdio",

@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Added a C# semantic dependency resolver module that uses VS Code's `executeDocumentSymbolProvider`, `executeReferenceProvider`, and `executeDefinitionProvider` to build graph edges across indexed C# files, with batched execution and deduplication so the LSP doesn't flood the extension host.
-- Documented the new C# graph resolver as a dedicated subproc between the MSP Stack and the Agent Tasks in the architecture diagram.
+- Added a dedicated `csharp-semantic` MCP upstream that exposes `csharp_list_workspace_files` and `csharp_extract_dependency_graph` over stdio, using the VS Code C# language service when available and a file-based fallback otherwise.
+- Documented the IDE-native semantic bridge pattern in the architecture diagram and README: semantic providers are wrapped as MCP upstreams and then aggregated by the gateway instead of being reached directly from the container.
+- Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
 
 ### Changed
 - `gateway.ts` now resets stale `gateway.db` / admin config state and stale `codebase-memory` daemon files before startup, keeps `CBM_CACHE_DIR` isolated and writable for the container, and discovers actual repo roots under `WORKSPACE_ROOT` instead of treating the whole monorepo as one project.

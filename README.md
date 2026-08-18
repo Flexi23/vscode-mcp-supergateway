@@ -33,22 +33,20 @@ graph LR
             Supergateway["Supergateway MCP Server"]
 
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
-            EdgeResolver@{ shape: subproc, label: "C# Semantic Edge Resolver<br/>(VS Code C# LSP / graph links)" }
+            SemanticBridge["VS Code API bridge MCP<br/>code dependency resolver<br/>for C# / JS / MD / ..." ]
             Loopback@{ shape: subproc, label: "Agent Tasks<br/>(loopback API :8081)" }
             MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
+            GitLab["GitLab MCP"]
             SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
             CodebaseMemory["Codebase Memory MCP<br>(3D graph/admin UI :9749)"]
-            GitLab["GitLab MCP"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
         end
     end
 
     Supergateway --> |forward proxy| Proxy
     Supergateway --> |scheduler| Loopback
-    Proxy --> |semantic graph edges| EdgeResolver
-    EdgeResolver --> |C# code links -> node edges| Loopback
-    Loopback <-. reads & updates .-> SiYuanNote
+    SemanticBridge -. provide semantic edges .-> CodebaseMemory
     Supergateway --> |provider|MCP
 
     MCP --> Copilot
@@ -58,6 +56,7 @@ graph LR
     LMStudioServer --> |diff / changeset| Loopback
     Loopback --> |managed prompt| LMStudioServer
     Loopback -. prepare context for<br/> cloud frontier models .-> Copilot
+    Loopback <-. reads & updates .-> SiYuanNote
 
     LocalAgents --> Copilot
     LocalAgents --> Loopback
@@ -67,8 +66,10 @@ graph LR
     Proxy --> GitLab
     Proxy --> MarkItDown
     Proxy --> SiYuanNote
+    Proxy --> SemanticBridge
 
     click Supergateway "blob/main/src/gateway.ts" "Entry point: src/gateway.ts (main())"
+    click SemanticBridge "blob/main/src/csharpSemanticMcp.ts" "Entry point: src/csharpSemanticMcp.ts (semantic API bridge)"
     click Loopback "blob/main/src/server.ts" "Entry point: src/server.ts (startBackendServer)"
     click Proxy href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway" _blank
     click MCP href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway (RBAC & tool access)" _blank
@@ -83,7 +84,7 @@ graph LR
     classDef thirdParty fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f;
     classDef hostApp fill:#e5e7eb,stroke:#4b5563,stroke-width:1px,color:#111827;
 
-    class Supergateway,Loopback entryPoint;
+    class Supergateway,SemanticBridge,Loopback entryPoint;
     class Proxy,MCP,SiYuanNote,CodebaseMemory,GitLab,MarkItDown thirdParty;
     class Copilot,LMStudioServer,LMStudioUI,LocalAgents hostApp;
 
@@ -185,6 +186,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
 | `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes `WORKSPACE_ROOT` (bind-mounted read-only at `/workspace`) on container startup via `CBM_AUTO_INDEX_PATH` (see [`src/gateway.ts`](src/gateway.ts)); own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
+| `csharp-semantic` | local bridge | Node | Exposes C# workspace/file enumeration and dependency graph extraction via the stdio MCP server in [`src/csharpSemanticMcp.ts`](src/csharpSemanticMcp.ts). It is the pattern for IDE-native capabilities: wrap VS Code / C# semantic APIs as a dedicated MCP tool surface, then let the gateway aggregate them behind one routing layer. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
@@ -198,6 +200,7 @@ Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.js
 - **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
 - **C# Semantic Edge Resolver:** Resolve cross-file C# dependencies in the VS Code C# language service and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
+- **Pattern: IDE native capabilities as MCP upstreams:** the gateway does not reach into VS Code directly. Instead, each IDE-specific capability is wrapped in its own MCP stdio bridge (for example [`src/csharpSemanticMcp.ts`](src/csharpSemanticMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `csharp_extract_dependency_graph`). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making semantic IDE features available to all clients through the same MCP interface.
 - **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 
@@ -242,15 +245,34 @@ docker compose up -d --build
 - [x] Multi-backend server orchestration (Codebase Memory, GitLab, SiYuan Note).
 - [x] Initial agent-assisted development groundwork.
 
-### Phase 2: LM Studio Loopback & Context Worker
+### Phase 2: Host-Side VS Code Semantic Bridge (Next)
+- [ ] Build a dedicated VS Code extension or host-side bridge that owns the language-service lifecycle and exposes semantic queries as MCP stdio servers.
+- [ ] Route semantic requests through the same gateway pattern used for existing upstreams; each semantic domain is a dedicated upstream, not a direct Docker-only dependency.
+- [ ] Expose typed tools such as `csharp_list_workspace_files`, `csharp_find_references`, `csharp_find_definitions`, and `csharp_extract_dependency_graph` from the host side.
+- [ ] Extend the same pattern to Razor and JavaScript/TypeScript symbol and reference queries so the graph includes UI/view semantics as well as backend semantics.
+- [ ] Add explicit Markdown reference extraction (`markdown_find_links`, `markdown_extract_reference_map`, `markdown_resolve_local_links`) so the semantic layer can connect prose, ADRs, docs, and code via structured references.
+- [ ] Keep the Docker gateway as the aggregator and policy layer while the VS Code host remains the semantic data provider.
+- [ ] Add a fallback path for non-IDE or non-C# environments that uses file-level dependency heuristics instead of Roslyn semantic data.
+
+### Phase 3: Unified Semantic Layer (Roslyn + Razor + JS + Docs)
+- [ ] Treat the IDE semantic stack as a single capability family: C#, Razor, JavaScript/TypeScript, and Markdown reference-aware analysis.
+- [ ] Build shared graph normalization so each semantic domain emits the same edges and metadata shape (`source`, `target`, `kind`, `uri`, `range`, `symbol`, `referenceType`).
+- [ ] Preserve language-specific nuance: Roslyn for C#, Razor symbol resolution for `.razor`, TypeScript language service for JS/TS, and markdown link/reference parsing for docs.
+- [ ] Feed the unified semantic graph into the same codebase-memory pipeline so the knowledge graph can reason across code and documentation, not only raw file names.
+- [ ] Add cross-domain queries such as “what docs mention this component?” or “which C# symbol owns this Razor binding?”
+
+### Phase 4: LM Studio Loopback & Context Worker
 - [ ] Implement local LM Studio MCP tool wrapper (`summarize_diff`, `generate_adr`).
 - [ ] Add zero-blocking async tool handling for local inference.
 - [ ] Graceful fallback & timeout management when local GPUs are under heavy load.
 
-### Phase 3: SiYuan Note & Task Management Enhancements
+### Phase 5: SiYuan Note & Task Management Enhancements
 - [ ] Structured task/ADR documents in SiYuan, driven by the `siyuan-note` upstream and `lmstudio_update_siyuan_task`.
 - [ ] Agent scope security layer (permission checks around destructive SiYuan operations).
 - [ ] Automated context bundle generator for Copilot prompts.
+
+### Design note: host-side semantic provider
+The semantic graph in this project is intentionally treated as a host-side capability, not as an in-container feature. VS Code and the installed language services own the Roslyn / Razor / JS/TS semantics, while the gateway remains the centralized routing layer. This keeps the architecture consistent: “feature provider” and “routing aggregator” are separate responsibilities, and each source of capability is exposed as its own MCP upstream. Markdown references are not a separate ecosystem; they are a semantic layer that links code and docs explicitly, so the graph can answer questions across implementation, UX, and documentation.
 
 ---
 

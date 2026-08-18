@@ -1,0 +1,75 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import * as z from 'zod/v4';
+import { CsharpDependencyExtractor } from './services/csharpDependencyExtractor';
+
+const workspaceRoot = process.env.WORKSPACE_ROOT || process.env.CBM_DEFAULT_PATH || '/workspace';
+
+const listFilesSchema = z.object({
+  root: z.string().optional().describe('Directory to scan for C# files. Defaults to WORKSPACE_ROOT.'),
+  include: z.array(z.string()).optional().describe('Optional list of directory prefixes to include.'),
+});
+
+const dependencyGraphSchema = z.object({
+  root: z.string().optional().describe('Directory to scan for C# files. Defaults to WORKSPACE_ROOT.'),
+  maxEdges: z.number().int().positive().max(5000).optional().describe('Maximum number of edges to return.'),
+});
+
+const server = new McpServer(
+  {
+    name: 'csharp-semantic-mcp',
+    version: '0.1.0',
+  },
+  {
+    capabilities: {},
+  },
+);
+
+server.registerTool('csharp_list_workspace_files', {
+  description: 'List all C# source files under the configured workspace root.',
+  inputSchema: listFilesSchema,
+}, async (args) => {
+  const parsed = listFilesSchema.parse(args ?? {});
+  const root = parsed.root || workspaceRoot;
+  const extractor = new CsharpDependencyExtractor(root);
+  const files = extractor.collectCSharpFiles(root);
+  const included = parsed.include && parsed.include.length > 0
+    ? files.filter((file) => parsed.include!.some((prefix) => file.fsPath.includes(prefix)))
+    : files;
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ root, total: included.length, files: included.map((file) => file.fsPath) }, null, 2),
+    }],
+  };
+});
+
+server.registerTool('csharp_extract_dependency_graph', {
+  description: 'Extract a simple C# dependency graph from the workspace and return the graph links as JSON.',
+  inputSchema: dependencyGraphSchema,
+}, async (args) => {
+  const parsed = dependencyGraphSchema.parse(args ?? {});
+  const root = parsed.root || workspaceRoot;
+  const extractor = new CsharpDependencyExtractor(root);
+  const allLinks = await extractor.extractEdgesFromFilesystem(root);
+  const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ root, totalEdges: allLinks.length, edges: limited }, null, 2),
+    }],
+  };
+});
+
+async function main(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error(`[csharp-semantic] ready for ${workspaceRoot}`);
+}
+
+main().catch((error) => {
+  console.error('[csharp-semantic] failed to start:', error);
+  process.exit(1);
+});
