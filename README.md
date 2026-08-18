@@ -117,11 +117,17 @@ Then edit [`.env`](.env.example):
 
 | Variable | Required | Purpose |
 |---|---|---|
+| `GITLAB_API_URL` | **required** for the `gitlab` upstream | Base URL for the GitLab REST API, for example `https://gitlab.uni-rostock.de/api/v4`. |
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
 | `SIYUAN_TOKEN` | optional for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token). For local/dev mode you can leave it empty and set `SIYUAN_TOKEN_REQUIRED=false`; the upstream then talks to the kernel without an `Authorization` header. |
 | `SIYUAN_TOKEN_REQUIRED` | optional | When set to `true`, the gateway warns if the token is empty or a placeholder; otherwise token auth is disabled and the upstream works without one. |
 | `SIYUAN_ACCESS_AUTH_CODE` | **required** for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start without it (or `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true`). |
-| `WORKSPACE_ROOT` | **required** | Absolute host path to the workspace root. The SiYuan workspace dir (`${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace`) and the `codebase-memory` auto-index target (bind-mounted read-only at `/workspace` in the `gateway` container) are both derived from this single variable. |
+| `SIYUAN_WORKSPACE_DIR` | **required** | Absolute host path to the SiYuan workspace directory, mounted directly at `/siyuan/workspace` inside the `siyuan` container. This is intentionally independent from the Codebase Memory paths. |
+| `GATEWAY_HOST_DATA_DIR` | **required** | Absolute host path for the gateway runtime data directory (the `gateway.db` and admin config), mounted into the `gateway` container at `/app/data`. This is separate from the CBM cache. |
+| `CBM_AUTO_INDEX_ENABLED` | optional | Set to `true` to enable the startup auto-index; otherwise startup indexing stays off and `CBM_AUTO_INDEX_PATH` is ignored. |
+| `CBM_AUTO_INDEX_PATH` | only when enabled | Absolute host path that Codebase Memory should index on startup. Required only if `CBM_AUTO_INDEX_ENABLED=true`. |
+| `CBM_DEFAULT_PATH` | **required** | Absolute host path that Codebase Memory opens by default in its UI. |
+| `CBM_CACHE_DIR` | **required** | Absolute host path for the bind mount that Codebase Memory uses as its writable cache; it is mounted into the `gateway` container at `/root/cbm-cache`. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
 
 ### 3. Start
@@ -156,6 +162,8 @@ docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
 
 The admin UI lives at <http://localhost:3100/admin>.
 
+> Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
+
 ---
 
 ## 📦 Services & Ports
@@ -185,7 +193,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes `WORKSPACE_ROOT` (bind-mounted read-only at `/workspace`) on container startup via `CBM_AUTO_INDEX_PATH` (see [`src/gateway.ts`](src/gateway.ts)); own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the absolute `CBM_AUTO_INDEX_PATH` on container startup (mounted read-only at `/workspace`), and opens the absolute `CBM_DEFAULT_PATH` in its UI; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
 | `csharp-semantic` | local bridge | Node | Exposes C# workspace/file enumeration and dependency graph extraction via the stdio MCP server in [`src/csharpSemanticMcp.ts`](src/csharpSemanticMcp.ts). It is the pattern for IDE-native capabilities: wrap VS Code / C# semantic APIs as a dedicated MCP tool surface, then let the gateway aggregate them behind one routing layer. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
@@ -215,7 +223,7 @@ docker compose down            # stop and remove
 ```
 
 Notes:
-- **Data persistence:** the gateway DB lives in the `gateway-data` named volume (not a bind mount) — inspect with `docker compose exec gateway sh`. The SiYuan workspace is a host bind mount derived from `WORKSPACE_ROOT` (see [.env.example](.env.example)), so it's directly inspectable/backupable on the host.
+- **Data persistence:** the gateway DB lives in the `gateway-data` named volume (not a bind mount) — inspect with `docker compose exec gateway sh`. The SiYuan workspace is a host bind mount from `SIYUAN_WORKSPACE_DIR` (see [.env.example](.env.example)), so it's directly inspectable/backupable on the host.
 - **Node ≥24 required:** `@mspstack/mcp-gateway` declares it in its `engines` field, so [`Dockerfile`](Dockerfile) uses `node:24-alpine` (builder) / `node:24-bookworm-slim` (runtime). Do not downgrade to `node:20`.
 - **Image size (~2.9 GB):** caused by Python's `markitdown[all]` (onnxruntime, pandas, azure SDKs, ...) plus ~330 Node packages. Accepted trade-off for having zero host-level dependencies.
 

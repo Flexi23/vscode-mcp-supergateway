@@ -7,9 +7,11 @@ export interface ModelConfig {
   system_prompt?: string;
 }
 
+import { requireEnv } from '../config/env';
+
 export class LMStudioClient {
   // overridable so the backend can reach a host-side LM Studio instance when containerized
-  private readonly baseUrl: string = process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1';
+  private readonly baseUrl: string = requireEnv('LMSTUDIO_BASE_URL');
 
   async isServerAvailable(): Promise<boolean> {
     try {

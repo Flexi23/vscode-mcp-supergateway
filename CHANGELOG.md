@@ -12,12 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
 
 ### Changed
-- `gateway.ts` now resets stale `gateway.db` / admin config state and stale `codebase-memory` daemon files before startup, keeps `CBM_CACHE_DIR` isolated and writable for the container, and discovers actual repo roots under `WORKSPACE_ROOT` instead of treating the whole monorepo as one project.
-- The `siyuan-note` upstream now supports local no-token operation: `SIYUAN_TOKEN_REQUIRED=false` disables the Authorization header entirely, while `SIYUAN_TOKEN` stays optional for dev mode and the lock-screen code remains under `SIYUAN_ACCESS_AUTH_CODE`.
-- `SiyuanClient` and the local docs now treat SiYuan auth as optional, so the stack can run without a placeholder or invalid API token while preserving opt-in token mode for real deployments.
-- Fixed the local SiYuan Docker startup to use the official kernel `serve` command instead of a shell wrapper, which prevents the `unknown command "sh" for "kernel"` restart loop; the bypass flag is now defined via `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true` for lock-screen-free local dev.
-- `gateway.ts` persists the CBM default workspace values (`default_path`, `selected_path`, `defaultPath`, `workspace_path`, `root_path`, `project_root`) to `/workspace`, so the graph UI opens on the mounted workspace instead of a stale empty state.
-- Fixed the stale gateway registration issue by wiring the SiYuan upstream to the direct Node entrypoint (`/app/node_modules/siyuan-mcp/dist/index.js`) and ignoring generated runtime state in `gateway-data/` so restarts no longer reload a dead admin config.
+- `docker-compose.yml` and `.env` now use explicit host bind-mount paths for the gateway data dir, Codebase Memory cache, and SiYuan workspace, with the GitLab API URL moved into the environment as well. This keeps runtime state and CBM cache independent and makes the config single-source-of-truth.
+- Startup auto-indexing is now opt-in via `CBM_AUTO_INDEX_ENABLED`; `CBM_AUTO_INDEX_PATH` is only required when that flag is `true`, so disabled mode no longer fails on a missing path.
+- The C#-only extractor was generalized to a semantic dependency resolver that handles `.cs`, `.razor`, `.js`, `.ts`, and Markdown references, and the related rename/docs cleanup was completed to match the broader responsibilities.
+- The README, gateway config, and environment docs were updated to match the final runtime layout and the separate host-mount model for the gateway DB, CBM cache, and workspace volumes.
 
 ## [2.2.0] - 2026-08-16
 ### Changed

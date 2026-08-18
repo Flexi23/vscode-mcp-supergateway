@@ -7,7 +7,8 @@ import path from 'path';
 import http from 'http';
 import os from 'os';
 import { startBackendServer } from './server';
-import { CsharpDependencyExtractor } from './services/csharpDependencyExtractor';
+import { SemanticDependencyResolver } from './services/semanticDependencyResolver';
+import { requireEnv, requirePort } from './config/env';
 
 interface UpstreamConfig {
   id: string;
@@ -22,12 +23,14 @@ interface GatewayConfig {
   upstreams: UpstreamConfig[];
 }
 
-const dataDir = process.env.GATEWAY_DATA_DIR || '/app/data';
-const adminPort = Number(process.env.MCP_GATEWAY_ADMIN_PORT || 3100);
-const publicPort = Number(process.env.MCP_GATEWAY_PUBLIC_PORT || 8080);
-const cbmUiPort = Number(process.env.CBM_UI_PORT || 9749);
-const cbmCacheDir = process.env.CBM_CACHE_DIR || '/root/cbm-cache';
-const cbmDefaultPath = process.env.CBM_DEFAULT_PATH || process.env.WORKSPACE_ROOT || '/workspace';
+const dataDir = requireEnv('GATEWAY_DATA_DIR');
+const adminPort = requirePort('MCP_GATEWAY_ADMIN_PORT');
+const adminUiPort = requirePort('ADMIN_UI_PORT');
+const publicPort = requirePort('MCP_GATEWAY_PUBLIC_PORT');
+const cbmUiPort = requirePort('CBM_UI_PORT');
+const cbmUiBackendPort = requirePort('CBM_UI_BACKEND_PORT');
+const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
+const cbmDefaultPath = requireEnv('CBM_DEFAULT_PATH');
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -93,14 +96,16 @@ function cleanupStaleCodebaseMemoryDaemon() {
 function buildAdminConfig(): GatewayConfig {
   const configPath = path.join(__dirname, '..', 'docker', 'gateway.config.json');
   const config: GatewayConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  const siYuanTokenRequired = String(process.env.SIYUAN_TOKEN_REQUIRED ?? 'false').toLowerCase() === 'true';
+  const siYuanTokenRequired = process.env.SIYUAN_TOKEN_REQUIRED === 'true';
 
   for (const upstream of config.upstreams) {
-    if (upstream.id === 'gitlab' && process.env.GITLAB_PERSONAL_ACCESS_TOKEN) {
-      upstream.env = { ...upstream.env, GITLAB_PERSONAL_ACCESS_TOKEN: process.env.GITLAB_PERSONAL_ACCESS_TOKEN };
+    if (upstream.id === 'gitlab') {
+      const gitlabApiUrl = requireEnv('GITLAB_API_URL');
+      const gitlabToken = requireEnv('GITLAB_PERSONAL_ACCESS_TOKEN');
+      upstream.env = { ...upstream.env, GITLAB_API_URL: gitlabApiUrl, GITLAB_PERSONAL_ACCESS_TOKEN: gitlabToken };
     }
     if (upstream.id === 'siyuan-note') {
-      const siYuanToken = process.env.SIYUAN_TOKEN || '';
+      const siYuanToken = process.env.SIYUAN_TOKEN ?? '';
       upstream.env = {
         ...upstream.env,
         SIYUAN_HOST: 'siyuan',
@@ -109,7 +114,7 @@ function buildAdminConfig(): GatewayConfig {
         SIYUAN_TOKEN_REQUIRED: String(siYuanTokenRequired),
       };
       if (siYuanTokenRequired && (!siYuanToken || ['Supergateway', 'siyuan_api_token_here', 'your-api-token-here'].includes(siYuanToken))) {
-        console.warn('[siyuan-note] SIYUAN_TOKEN_REQUIRED=true but the token is empty or placeholder. Set the real API token from SiYuan: Settings -> About -> API Token.');
+        throw new Error('[siyuan-note] SIYUAN_TOKEN_REQUIRED=true but SIYUAN_TOKEN is missing or still a placeholder value. Set the real token in the active .env file and compose environment.');
       }
     }
     if (upstream.id === 'codebase-memory') {
@@ -120,21 +125,149 @@ function buildAdminConfig(): GatewayConfig {
   return config;
 }
 
+function buildDashboardHtml(activeTarget: string = 'admin') {
+  const targets: Record<string, { label: string; url: string }> = {
+    admin: { label: 'Admin UI', url: `http://127.0.0.1:${adminUiPort}/admin` },
+    cbm: { label: 'Codebase Memory', url: `http://127.0.0.1:${cbmUiPort}/?tab=stats` },
+    siyuan: { label: 'SiYuan', url: 'http://127.0.0.1:6806/' },
+  };
+
+  const safeTarget = targets[activeTarget] ? activeTarget : 'admin';
+  const buttons = Object.entries(targets)
+    .map(([key, value]) => {
+      const selected = key === safeTarget ? 'selected' : '';
+      return `<a class="nav-button ${selected}" href="/dashboard?target=${key}">${value.label}</a>`;
+    })
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Supergateway Dashboard</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f172a;
+        --panel: rgba(15, 23, 42, 0.75);
+        --panel-alt: rgba(30, 41, 59, 0.95);
+        --border: rgba(148, 163, 184, 0.3);
+        --text: #e2e8f0;
+        --muted: #cbd5e1;
+        --accent: #38bdf8;
+        --accent-strong: #0ea5e9;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(180deg, #020817 0%, #0f172a 100%);
+        color: var(--text);
+      }
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.9rem 1.25rem;
+        background: rgba(15, 23, 42, 0.92);
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(8px);
+      }
+      .brand {
+        margin-right: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .nav-button {
+        padding: 0.65rem 1rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.8);
+        color: var(--text);
+        text-decoration: none;
+        transition: 0.2s ease;
+        font-size: 0.92rem;
+      }
+      .nav-button:hover { border-color: var(--accent); }
+      .nav-button.selected {
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        color: #082f49;
+        border-color: transparent;
+        font-weight: 700;
+      }
+      .frame-shell {
+        height: calc(100vh - 72px);
+        padding: 1rem;
+      }
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">Supergateway</div>
+      ${buttons}
+    </header>
+    <div class="frame-shell">
+      <iframe
+        title="hosted ui"
+        src="${targets[safeTarget].url}"
+        referrerpolicy="no-referrer-when-downgrade"
+      ></iframe>
+    </div>
+  </body>
+</html>`;
+}
+
 function startForwardProxy(
   port: number,
   targetPort: number,
-  options: { bindHost?: string; rewriteOriginToLoopback?: boolean } = {},
+  options: {
+    bindHost?: string;
+    rewriteOriginToLoopback?: boolean;
+    redirectRootToAdmin?: boolean;
+    dashboardEnabled?: boolean;
+  } = {},
 ) {
-  const { bindHost = '0.0.0.0', rewriteOriginToLoopback = false } = options;
+  const {
+    bindHost = '0.0.0.0',
+    rewriteOriginToLoopback = false,
+    redirectRootToAdmin = false,
+    dashboardEnabled = true,
+  } = options;
 
   const server = http.createServer((req, res) => {
+    const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
+
     if (req.method === 'GET' && req.url === '/ping') {
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('ok');
       return;
     }
 
+    if (req.method === 'GET' && dashboardEnabled && (requestUrl.pathname === '/' || requestUrl.pathname === '/dashboard')) {
+      const target = requestUrl.searchParams.get('target') ?? 'admin';
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(buildDashboardHtml(target));
+      return;
+    }
+
     const headers = { ...req.headers, host: `127.0.0.1:${targetPort}` };
+    let targetPath = req.url ?? '/';
+    if (redirectRootToAdmin && requestUrl.pathname === '/') {
+      targetPath = '/admin';
+    }
     // The CBM UI's same-origin check only accepts an Origin/Referer whose host is
     // literally 127.0.0.1 (its own bind address) — it rejects the browser's
     // "localhost" Origin even though it resolves to the same address.
@@ -148,7 +281,7 @@ function startForwardProxy(
         hostname: '127.0.0.1',
         port: targetPort,
         method: req.method,
-        path: req.url,
+        path: targetPath,
         headers,
       },
       (upstreamResponse) => {
@@ -225,10 +358,10 @@ function configureCodebaseMemoryUi(cacheDir: string, port: number, defaultPath: 
   fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2));
 }
 
-// Auto-indexes the actual project folders under the mounted WORKSPACE_ROOT
-// instead of treating the whole monorepo as one single repo. Codebase Memory
-// shows project folders on its start page when each repository is indexed
-// individually.
+// Auto-indexes the actual project folders under the configured Codebase Memory
+// root instead of treating the whole monorepo as one single repo. Codebase
+// Memory shows project folders on its start page when each repository is
+// indexed individually.
 function discoverProjectRoots(workspaceRoot: string): string[] {
   if (!fs.existsSync(workspaceRoot)) {
     return [];
@@ -284,7 +417,7 @@ function autoIndexCodebaseMemory(cacheDir: string, workspaceRoot: string) {
 }
 
 async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: string) {
-  const extractor = new CsharpDependencyExtractor(repoPath);
+  const extractor = new SemanticDependencyResolver(repoPath);
   const files = extractor.collectCSharpFiles(repoPath);
 
   if (files.length === 0) {
@@ -294,7 +427,7 @@ async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: s
 
   console.log(`[codebase-memory] starting C# edge enrichment for ${path.basename(repoPath)} (${files.length} files)...`);
 
-  const graphLinks = await extractor.extractEdges(files, (message, percent) => {
+  const graphLinks = await extractor.extractEdges(files, (message: string, percent: number) => {
     console.log(`[codebase-memory] ${message} [${percent}%]`);
   });
 
@@ -328,18 +461,19 @@ function main() {
   ensureDir(cbmCacheDir);
   resetGatewayPersistentState();
   cleanupStaleCodebaseMemoryDaemon();
-  // Keep configured/published ports identical: the CBM UI rejects requests whose
-  // Origin/Referer port doesn't match its own configured ui_port (403).
-  configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort, cbmDefaultPath);
+  // The public port is a proxy in front of the real CBM UI. The upstream UI
+  // only accepts a matching Origin/Referer port, so we bind its real loopback
+  // listener to a private internal port and proxy 9749 to it instead of trying
+  // to self-proxy on the exact same port.
+  configureCodebaseMemoryUi(cbmCacheDir, cbmUiBackendPort, cbmDefaultPath);
 
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
   fs.writeFileSync(adminConfigPath, JSON.stringify(adminConfig, null, 2));
 
-  const runtimeWorkspaceRoot = process.env.WORKSPACE_ROOT || '/workspace';
   const enableStartupAutoIndex = process.env.CBM_AUTO_INDEX_ENABLED === 'true';
-  const startupIndexPath = process.env.CBM_AUTO_INDEX_PATH || runtimeWorkspaceRoot;
-  if (enableStartupAutoIndex && startupIndexPath) {
+  if (enableStartupAutoIndex) {
+    const startupIndexPath = requireEnv('CBM_AUTO_INDEX_PATH');
     autoIndexCodebaseMemory(cbmCacheDir, startupIndexPath);
   } else {
     console.log('[codebase-memory] startup auto-index is disabled; run index_repository manually for the first project index.');
@@ -359,12 +493,13 @@ function main() {
     process.exit(code ?? 1);
   });
 
+  // The CBM UI only listens on loopback in the container; expose it via a
+  // public proxy so 9749 is reachable from the host while preserving the same
+  // Origin/Referer rewrite required by its browser-side checks.
+  startForwardProxy(cbmUiPort, cbmUiBackendPort, { rewriteOriginToLoopback: true, dashboardEnabled: false });
+  startForwardProxy(adminUiPort, adminPort, { redirectRootToAdmin: true, dashboardEnabled: false });
   startForwardProxy(publicPort, adminPort);
   startBackendServer(Number(process.env.BACKEND_PORT || 8081));
-  startForwardProxy(cbmUiPort, cbmUiPort, {
-    bindHost: getContainerAddress(),
-    rewriteOriginToLoopback: true,
-  });
 }
 
 main();

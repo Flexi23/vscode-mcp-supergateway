@@ -4,26 +4,33 @@ services:
     image: vscode-mcp-supergateway-backend:local
     command: ["node", "dist/gateway.js"]
     ports:
-      - "8080:8080"
-      - "3100:3100"
-      - "8081:8081"
-      - "9749:9749"
+      - "${MCP_GATEWAY_PUBLIC_PORT}:${MCP_GATEWAY_PUBLIC_PORT}"
+      - "${ADMIN_UI_PORT}:${ADMIN_UI_PORT}"
+      - "${BACKEND_PORT}:${BACKEND_PORT}"
+      - "${CBM_UI_PORT}:${CBM_UI_PORT}"
     environment:
+      GATEWAY_DATA_DIR: "/app/data"
+      MCP_GATEWAY_ADMIN_PORT: ${MCP_GATEWAY_ADMIN_PORT}
+      ADMIN_UI_PORT: ${ADMIN_UI_PORT}
+      MCP_GATEWAY_PUBLIC_PORT: ${MCP_GATEWAY_PUBLIC_PORT}
+      BACKEND_PORT: ${BACKEND_PORT}
+      CBM_AUTO_INDEX_ENABLED: ${CBM_AUTO_INDEX_ENABLED}
+      CBM_AUTO_INDEX_PATH: ${CBM_AUTO_INDEX_PATH}
+      CBM_CACHE_DIR: "/root/cbm-cache"
+      CBM_DEFAULT_PATH: ${CBM_DEFAULT_PATH}
+      CBM_UI_BACKEND_PORT: ${CBM_UI_BACKEND_PORT}
+      CBM_UI_PORT: ${CBM_UI_PORT}
+      GITLAB_API_URL: ${GITLAB_API_URL}
       GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
       LMSTUDIO_BASE_URL: ${LMSTUDIO_BASE_URL}
-      WORKSPACE_ROOT: /workspace
-      BACKEND_PORT: "8081"
-      CBM_UI_PORT: "9749"
-      CBM_DEFAULT_PATH: /workspace
-      CBM_AUTO_INDEX_PATH: /workspace
-      CBM_CACHE_DIR: /root/cbm-cache
-      SIYUAN_TOKEN: ${SIYUAN_TOKEN:-}
-      SIYUAN_TOKEN_REQUIRED: ${SIYUAN_TOKEN_REQUIRED:-false}
-      # Start with a manual first index; startup auto-index is intentionally off.
-      CBM_AUTO_INDEX_ENABLED: "false"
+      SIYUAN_PORT: ${SIYUAN_PORT}
+      SIYUAN_TOKEN: ${SIYUAN_TOKEN}
+      SIYUAN_TOKEN_REQUIRED: ${SIYUAN_TOKEN_REQUIRED}
+      SIYUAN_WORKSPACE_DIR: ${SIYUAN_WORKSPACE_DIR}
     volumes:
-      - ./gateway-data:/app/data
-      - ${WORKSPACE_ROOT}:/workspace:ro
+      - ${GATEWAY_HOST_DATA_DIR}:/app/data
+      - ${CBM_CACHE_DIR}:/root/cbm-cache
+      - ${CBM_DEFAULT_PATH}:/workspace:ro
     restart: unless-stopped
     depends_on:
       - siyuan
@@ -32,12 +39,13 @@ services:
     image: b3log/siyuan
     command: ["serve", "--workspace=/siyuan/workspace/"]
     environment:
-      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE:-}
-      SIYUAN_ACCESS_AUTH_CODE_BYPASS: ${SIYUAN_ACCESS_AUTH_CODE_BYPASS:-true}
+      SIYUAN_PORT: ${SIYUAN_PORT}
+      SIYUAN_ACCESS_AUTH_CODE: ${SIYUAN_ACCESS_AUTH_CODE}
+      SIYUAN_ACCESS_AUTH_CODE_BYPASS: ${SIYUAN_ACCESS_AUTH_CODE_BYPASS}
     ports:
-      - "6806:6806"
+      - "${SIYUAN_PORT}:${SIYUAN_PORT}"
     volumes:
-      # Derived from WORKSPACE_ROOT: this repo's own siyuan-workspace/ subfolder.
-      - ${WORKSPACE_ROOT}/vscode-mcp-supergateway/siyuan-workspace:/siyuan/workspace
+      # Absolute host path from SIYUAN_WORKSPACE_DIR — set explicitly in .env.
+      - ${SIYUAN_WORKSPACE_DIR}:/siyuan/workspace
     restart: unless-stopped
 
