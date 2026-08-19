@@ -121,7 +121,8 @@ Then edit [`.env`](.env.example):
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
 | `SIYUAN_TOKEN` | optional for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token). For local/dev mode you can leave it empty and set `SIYUAN_TOKEN_REQUIRED=false`; the upstream then talks to the kernel without an `Authorization` header. |
 | `SIYUAN_TOKEN_REQUIRED` | optional | When set to `true`, the gateway warns if the token is empty or a placeholder; otherwise token auth is disabled and the upstream works without one. |
-| `SIYUAN_ACCESS_AUTH_CODE` | **required** for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start without it (or `SIYUAN_ACCESS_AUTH_CODE_BYPASS=true`). |
+| `SIYUAN_LOCKSCREEN_CODE` | optional for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start when `SIYUAN_LOCKSCREEN_CODE_REQUIRED=true` and no code is configured. |
+| `SIYUAN_LOCKSCREEN_CODE_REQUIRED` | optional | Set to `true` when the SiYuan container should enforce its lock-screen code; set to `false` for the local no-auth dev setup. |
 | `SIYUAN_WORKSPACE_DIR` | **required** | Absolute host path to the SiYuan workspace directory, mounted directly at `/siyuan/workspace` inside the `siyuan` container. This is intentionally independent from the Codebase Memory paths. |
 | `CBM_HOST_DATA_DIR` | **required** | Absolute host path for the gateway runtime data directory (the `gateway.db` and admin config), mounted into the `gateway` container at `/app/data`. This is separate from the CBM cache. |
 | `CBM_HOST_WORKSPACE_DIR` | **required** | Absolute host path on the machine that is mounted read-only into the `gateway` container at `/workspace`. This is the host-side source for the workspace tree Codebase Memory should browse. |
@@ -161,7 +162,7 @@ curl http://localhost:8080/ping     # -> ok
 docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
 ```
 
-The admin UI lives at <http://localhost:3100/admin>, and the dashboard (a tabbed view over the admin UI, Codebase Memory, and SiYuan) at <http://localhost:3100/dashboard> — both behind the admin port, not the public MCP port. `docker compose logs gateway` also prints both URLs on startup.
+The admin UI lives at <http://localhost:3100/admin>, and the direct tabbed entry point is <http://localhost:3100/?tab=admin> (or `?tab=cbm` / `?tab=siyuan`). The public MCP endpoint remains on port `8080`; the admin UI and tab navigation stay on port `3100`.
 
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
@@ -174,7 +175,7 @@ The admin UI lives at <http://localhost:3100/admin>, and the dashboard (a tabbed
 | Port | What it is |
 |---|---|
 | `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. SSE/MCP traffic only; the dashboard is not served here. |
-| `3100` | `@mspstack/mcp-gateway` admin UI (`/admin`) + direct MCP endpoint, and the human-facing dashboard (`/dashboard`, also the response for `/`). |
+| `3100` | `@mspstack/mcp-gateway` admin UI (`/admin`) + direct tabbed entry point at `/` with `?tab=admin`, `?tab=cbm`, and `?tab=siyuan`. |
 | `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`), started in-process via `startBackendServer()`. |
 | `9749` | `codebase-memory-mcp`'s own 3D graph-visualization UI (<http://localhost:9749>). Its coordination daemon only binds `127.0.0.1` and rejects cross-origin browser requests, so `gateway.ts` enables it via `CBM_CACHE_DIR/config.json` and reverse-proxies the published port to it, rewriting `Origin`/`Referer` to satisfy its same-origin check; override the port with `CBM_UI_PORT`. |
 
@@ -200,7 +201,32 @@ All four run inside the `gateway` container; the runtime column only says which 
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
 
-Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json). The `siyuan` service itself (image `b3log/siyuan`) is defined in [`docker-compose.yml`](docker-compose.yml) and also publishes its own web UI at <http://localhost:6806>; set `SIYUAN_ACCESS_AUTH_CODE` in `.env` to lock it down.
+Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json). The `siyuan` service itself (image `b3log/siyuan`) is defined in [`docker-compose.yml`](docker-compose.yml) and also publishes its own web UI at <http://localhost:6806>; set `SIYUAN_LOCKSCREEN_CODE` in `.env` and set `SIYUAN_LOCKSCREEN_CODE_REQUIRED=true` to lock it down.
+
+### Semantic Dependency Resolver
+
+The semantic dependency resolver lives in [`src/services/semanticDependencyResolver.ts`](src/services/semanticDependencyResolver.ts). It is the bridge that turns a repository into graph edges for Codebase Memory instead of leaving each project as an isolated node.
+
+It does three things in sequence:
+
+1. Discover semantic source files under a project root.
+2. Resolve cross-file references using the VS Code semantic APIs when they are available.
+3. Convert the resulting graph into a trace payload and ingest it with `codebase-memory-mcp cli ingest_traces`.
+
+The current implementation is intentionally language-aware but not C#-only:
+
+- `C#` / `.cs` and Razor `.razor` files are resolved through the VS Code C# language service (`executeReferenceProvider`, `executeDefinitionProvider`, and symbol extraction).
+- `TypeScript` / `JavaScript` imports are parsed from `.ts`, `.tsx`, `.js`, and `.jsx` files using import/require patterns.
+- Markdown links and component references are also recognized, so docs and frontend component trees can contribute graph edges.
+- If the IDE semantic layer is unavailable or not ready, the same resolver falls back to a filesystem-based graph extraction that still resolves relative imports and local references without the language service.
+
+The runtime integration is in [`src/gateway.ts`](src/gateway.ts): after `index_repository` succeeds, `enrichRepositorySemanticEdges()` calls the resolver, writes the generated edge list to a local JSON artifact, and then triggers `ingest_traces` against the project name in Codebase Memory.
+
+This means the flow is:
+
+`index_repository` -> `extractEdges` -> `writeLinksFile` -> `ingest_traces`
+
+The MCP-facing entry point is [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts), which exposes both C# and TypeScript workspace tools over stdio for the gateway to aggregate like any other upstream. That keeps the semantic logic behind a typed MCP tool surface instead of reaching directly into the host editor from the container runtime.
 
 ---
 
@@ -208,8 +234,8 @@ Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.js
 
 - **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
-- **C# Semantic Edge Resolver:** Resolve cross-file C# dependencies in the VS Code C# language service and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
-- **Pattern: IDE native capabilities as MCP upstreams:** the gateway does not reach into VS Code directly. Instead, each IDE-specific capability is wrapped in its own MCP stdio bridge (for example [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `typescript_extract_dependency_graph`, and friends). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making semantic IDE features available to all clients through the same MCP interface.
+- **Semantic Edge Resolver:** Resolve cross-file dependencies from the active IDE semantics (C# and TypeScript/JavaScript first, with file-based fallbacks for the same code graph) and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
+- **Pattern: IDE native capabilities as MCP upstreams:** the gateway does not reach into VS Code directly. Instead, each IDE-specific capability is wrapped in its own MCP stdio bridge (for example [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `csharp_extract_dependency_graph`, `typescript_extract_dependency_graph`, and friends). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making semantic IDE features available to all clients through the same MCP interface.
 - **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 
@@ -257,7 +283,7 @@ docker compose up -d --build
 ### Phase 2: Host-Side VS Code Semantic Bridge (Next)
 - [ ] Build a dedicated VS Code extension or host-side bridge that owns the language-service lifecycle and exposes semantic queries as MCP stdio servers.
 - [ ] Route semantic requests through the same gateway pattern used for existing upstreams; each semantic domain is a dedicated upstream, not a direct Docker-only dependency.
-- [ ] Expose typed tools such as `csharp_list_workspace_files`, `csharp_find_references`, `csharp_find_definitions`, and `csharp_extract_dependency_graph` from the host side.
+- [ ] Expose typed tools such as `csharp_list_workspace_files`, `csharp_extract_dependency_graph`, `typescript_list_workspace_files`, and `typescript_extract_dependency_graph` from the host side.
 - [ ] Extend the same pattern to Razor and JavaScript/TypeScript symbol and reference queries so the graph includes UI/view semantics as well as backend semantics.
 - [ ] Add explicit Markdown reference extraction (`markdown_find_links`, `markdown_extract_reference_map`, `markdown_resolve_local_links`) so the semantic layer can connect prose, ADRs, docs, and code via structured references.
 - [ ] Keep the Docker gateway as the aggregator and policy layer while the VS Code host remains the semantic data provider.

@@ -49,3 +49,21 @@ test('TypeScriptDependencyResolver resolves import graph for TS files only', asy
   assert.ok(links.some((link) => link.source.endsWith('src/index.ts') && link.target.endsWith('src/utils.ts')));
   assert.ok(links.some((link) => link.source.endsWith('src/ui/button.ts') && link.target.endsWith('src/utils.ts')));
 });
+
+test('SemanticDependencyResolver accepts TypeScript-only repositories as semantic sources', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'semantic-ts-only-'));
+  fs.mkdirSync(path.join(root, 'src', 'ui'), { recursive: true });
+
+  fs.writeFileSync(path.join(root, 'src', 'index.ts'), "import './ui/button';\nimport { formatDate } from './utils';\nexport const current = formatDate(new Date());\n");
+  fs.writeFileSync(path.join(root, 'src', 'utils.ts'), 'export function formatDate(date: Date) { return date.toISOString(); }\n');
+  fs.writeFileSync(path.join(root, 'src', 'ui', 'button.ts'), "import { formatDate } from '../utils';\nexport const button = formatDate(new Date());\n");
+
+  const resolver = new SemanticDependencyResolver(root);
+  const files = resolver.collectSemanticFiles(root);
+  const links = await resolver.extractEdgesFromFilesystem(root);
+
+  assert.ok(files.some((file) => file.fsPath.endsWith('src/index.ts')));
+  assert.ok(files.some((file) => file.fsPath.endsWith('src/utils.ts')));
+  assert.ok(links.some((link) => link.source.endsWith('src/index.ts') && link.target.endsWith('src/utils.ts')));
+  assert.ok(links.some((link) => link.source.endsWith('src/ui/button.ts') && link.target.endsWith('src/utils.ts')));
+});

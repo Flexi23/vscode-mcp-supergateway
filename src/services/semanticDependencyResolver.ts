@@ -41,10 +41,15 @@ export class SemanticDependencyResolver {
       return [];
     }
 
-    if (!this.isCSharpExtensionReady()) {
-      console.warn('[SemanticDependencyResolver] language-service extension is not active or not ready yet.');
-      return this.extractEdgesFromFilesystem(this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes), onProgress);
+    const workspaceRoot = this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes);
+    const semanticApiReady = this.isCSharpExtensionReady();
+
+    if (!semanticApiReady) {
+      console.warn('[SemanticDependencyResolver] VS Code semantic API not available or not ready; falling back to filesystem-based dependency extraction.');
+      return this.extractEdgesFromFilesystem(workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes), onProgress);
     }
+
+    console.log('[SemanticDependencyResolver] VS Code semantic API detected and active; resolving graph links via IDE symbol references.');
 
     const edges = new Map<string, Set<string>>();
     const total = uniqueNodes.length;
@@ -307,7 +312,7 @@ export class SemanticDependencyResolver {
     return parent;
   }
 
-  collectCSharpFiles(rootDir: string): GraphUri[] {
+  collectSemanticFiles(rootDir: string): GraphUri[] {
     if (!rootDir || !fs.existsSync(rootDir)) {
       return [];
     }
@@ -341,16 +346,23 @@ export class SemanticDependencyResolver {
     return results;
   }
 
+  collectCSharpFiles(rootDir: string): GraphUri[] {
+    return this.collectSemanticFiles(rootDir);
+  }
+
   private isSupportedSemanticFile(filePath: string): boolean {
     const extension = path.extname(filePath).toLowerCase();
     return ['.cs', '.razor', '.js', '.jsx', '.ts', '.tsx', '.md', '.markdown'].includes(extension);
   }
 
   async extractEdgesFromFilesystem(rootDir: string, onProgress?: (message: string, percent: number, processed: number, total: number) => void): Promise<GraphLink[]> {
-    const files = this.collectCSharpFiles(rootDir);
+    const files = this.collectSemanticFiles(rootDir);
     if (files.length === 0) {
+      console.log('[SemanticDependencyResolver] filesystem fallback found no semantic source files to process.');
       return [];
     }
+
+    console.log(`[SemanticDependencyResolver] filesystem fallback active for ${files.length} semantic source files.`);
 
     const links = new Map<string, GraphLink>();
     const total = files.length;

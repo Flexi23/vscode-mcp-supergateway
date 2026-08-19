@@ -157,18 +157,18 @@ function buildAdminConfig(): GatewayConfig {
   return config;
 }
 
-function buildDashboardHtml(activeTarget: string = 'admin') {
-  const targets: Record<string, { label: string; url: string }> = {
+function buildDashboardHtml(activeTab: string = 'admin') {
+  const tabs: Record<string, { label: string; url: string }> = {
     admin: { label: 'MSPStack', url: `http://127.0.0.1:${adminUiPort}/admin` },
-    cbm: { label: 'CBM', url: '/cbm/overview' },
+    cbm: { label: 'CBM', url: `http://127.0.0.1:${adminUiPort}/cbm/overview` },
     siyuan: { label: 'SiYuan', url: 'http://127.0.0.1:6806/' },
   };
 
-  const safeTarget = targets[activeTarget] ? activeTarget : 'admin';
-  const buttons = Object.entries(targets)
+  const safeTab = tabs[activeTab] ? activeTab : 'admin';
+  const buttons = Object.entries(tabs)
     .map(([key, value]) => {
-      const selected = key === safeTarget ? 'selected' : '';
-      return `<a class="nav-button ${selected}" href="/dashboard?target=${key}">${value.label}</a>`;
+      const selected = key === safeTab ? 'selected' : '';
+      return `<a class="nav-button ${selected}" href="http://127.0.0.1:${adminUiPort}/?tab=${key}">${value.label}</a>`;
     })
     .join('');
 
@@ -254,7 +254,7 @@ function buildDashboardHtml(activeTarget: string = 'admin') {
     <div class="frame-shell">
       <iframe
         title="hosted ui"
-        src="${targets[safeTarget].url}"
+        src="${tabs[safeTab].url}"
         referrerpolicy="no-referrer-when-downgrade"
       ></iframe>
     </div>
@@ -411,9 +411,9 @@ function startForwardProxy(
     }
 
     if (req.method === 'GET' && dashboardEnabled && (requestUrl.pathname === '/' || requestUrl.pathname === '/dashboard')) {
-      const target = requestUrl.searchParams.get('target') ?? 'admin';
+      const tab = requestUrl.searchParams.get('tab') ?? 'admin';
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(buildDashboardHtml(target));
+      res.end(buildDashboardHtml(tab));
       return;
     }
 
@@ -646,7 +646,7 @@ async function enrichRepositorySemanticEdges(cacheDir: string, repoPath: string)
   indexJobs.set(repoPath, { status: 'enriching', message: `transferring semantic edges for ${projectName}`, updatedAt: Date.now() });
 
   try {
-    await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
+    await enrichCodebaseMemoryWithSemanticEdges(cacheDir, repoPath);
     indexJobs.set(repoPath, { status: 'success', message: 'semantic edges transferred', updatedAt: Date.now() });
   } catch (error) {
     indexJobs.set(repoPath, {
@@ -672,31 +672,31 @@ function autoIndexCodebaseMemory(cacheDir: string, workspaceRoot: string) {
   });
 }
 
-async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: string) {
+async function enrichCodebaseMemoryWithSemanticEdges(cacheDir: string, repoPath: string) {
   const extractor = new SemanticDependencyResolver(repoPath);
-  const files = extractor.collectCSharpFiles(repoPath);
+  const files = extractor.collectSemanticFiles(repoPath);
 
   if (files.length === 0) {
-    console.log('[codebase-memory] no C# files found for edge enrichment');
+    console.log('[codebase-memory] no semantic source files found for edge enrichment');
     return;
   }
 
-  console.log(`[codebase-memory] starting C# edge enrichment for ${path.basename(repoPath)} (${files.length} files)...`);
+  console.log(`[codebase-memory] starting semantic edge enrichment for ${path.basename(repoPath)} (${files.length} files)...`);
 
   const graphLinks = await extractor.extractEdges(files, (message: string, percent: number) => {
     console.log(`[codebase-memory] ${message} [${percent}%]`);
   });
 
   if (graphLinks.length === 0) {
-    console.log('[codebase-memory] no C# graph links produced');
+    console.log('[codebase-memory] no semantic graph links produced');
     return;
   }
 
   const projectName = path.basename(repoPath) || 'workspace';
-  const linksFile = path.join(cacheDir, 'csharp-edges.json');
+  const linksFile = path.join(cacheDir, 'semantic-edges.json');
   extractor.writeLinksFile(graphLinks, linksFile);
 
-  console.log(`[codebase-memory] ingesting ${graphLinks.length} C# graph links into project ${projectName}...`);
+  console.log(`[codebase-memory] ingesting ${graphLinks.length} semantic graph links into project ${projectName}...`);
   const child = spawn(
     'npx',
     ['-y', 'codebase-memory-mcp', 'cli', 'ingest_traces', '--project', projectName, '--traces', JSON.stringify(graphLinks)],
@@ -705,7 +705,7 @@ async function enrichCodebaseMemoryWithCSharpEdges(cacheDir: string, repoPath: s
 
   child.on('exit', (exitCode) => {
     if (exitCode === 0) {
-      console.log(`[codebase-memory] injected ${graphLinks.length} C# graph links into project ${projectName}`);
+      console.log(`[codebase-memory] injected ${graphLinks.length} semantic graph links into project ${projectName}`);
       return;
     }
     console.warn(`[codebase-memory] ingest_traces exited with code ${exitCode}`);
