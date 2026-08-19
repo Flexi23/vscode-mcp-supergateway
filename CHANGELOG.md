@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `docker-compose.yml` and `.env` now use explicit host bind-mount paths for the gateway data dir, Codebase Memory cache, and SiYuan workspace, with the GitLab API URL moved into the environment as well. This keeps runtime state and CBM cache independent and makes the config single-source-of-truth.
+- The host-side CBM cache variable was renamed to `CBM_HOST_CACHE_DIR` and the compose/service wiring now mounts that explicit host path at `/root/cbm-cache`, while the runtime container-side variable remains `CBM_CACHE_DIR` for the upstream itself.
+- `gateway.ts` now resets stale Codebase Memory runtime state (`config.json`, lockfiles, daemon directories, and `/tmp/cbm-daemon-*`) before startup so the UI defaults back to `/workspace` instead of reopening a stale `/root` browse root.
 - Startup auto-indexing is now opt-in via `CBM_AUTO_INDEX_ENABLED`; `CBM_AUTO_INDEX_PATH` is only required when that flag is `true`, so disabled mode no longer fails on a missing path.
 - The C#-only extractor was generalized to a semantic dependency resolver that handles `.cs`, `.razor`, `.js`, `.ts`, and Markdown references, and the related rename/docs cleanup was completed to match the broader responsibilities.
 - The README, gateway config, and environment docs were updated to match the final runtime layout and the separate host-mount model for the gateway DB, CBM cache, and workspace volumes.

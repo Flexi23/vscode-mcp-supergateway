@@ -28,9 +28,9 @@ services:
       SIYUAN_TOKEN_REQUIRED: ${SIYUAN_TOKEN_REQUIRED}
       SIYUAN_WORKSPACE_DIR: ${SIYUAN_WORKSPACE_DIR}
     volumes:
-      - ${GATEWAY_HOST_DATA_DIR}:/app/data
-      - ${CBM_CACHE_DIR}:/root/cbm-cache
-      - ${CBM_DEFAULT_PATH}:/workspace:ro
+      - ${CBM_HOST_WORKSPACE_DIR}:/workspace:ro
+      - ${CBM_HOST_DATA_DIR}:/app/data
+      - ${CBM_HOST_CACHE_DIR}:/root/cbm-cache
     restart: unless-stopped
     depends_on:
       - siyuan

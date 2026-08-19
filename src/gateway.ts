@@ -30,7 +30,6 @@ const publicPort = requirePort('MCP_GATEWAY_PUBLIC_PORT');
 const cbmUiPort = requirePort('CBM_UI_PORT');
 const cbmUiBackendPort = requirePort('CBM_UI_BACKEND_PORT');
 const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
-const cbmDefaultPath = requireEnv('CBM_DEFAULT_PATH');
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -41,6 +40,17 @@ function ensureDir(dir: string) {
     // path stays private and root-owned in the container.
   }
 }
+
+function normalizeContainerPath(envName: string, fallback: string): string {
+  const rawValue = requireEnv(envName);
+  if (/^[A-Za-z]:[\\/]/.test(rawValue)) {
+    console.warn(`[config] ${envName} points at a host Windows path (${rawValue}); using ${fallback} inside the container instead so the CBM UI resolves the Linux workspace root correctly.`);
+    return fallback;
+  }
+  return rawValue || fallback;
+}
+
+const cbmDefaultPath = normalizeContainerPath('CBM_DEFAULT_PATH', '/workspace');
 
 function resetGatewayPersistentState() {
   const staleFiles = ['gateway.db', 'gateway.db-shm', 'gateway.db-wal', 'admin-gateway-config.json'];
@@ -60,6 +70,27 @@ function resetGatewayPersistentState() {
     fs.rmSync(cbmCachePath, { force: true, recursive: true });
     removed += 1;
     console.log(`[gateway] removed stale cbm cache: ${cbmCachePath}`);
+  }
+
+  if (fs.existsSync(cbmCacheDir)) {
+    const runtimeStateFiles = ['config.json', '_config.db', '_config.db-shm', '_config.db-wal'];
+    for (const fileName of runtimeStateFiles) {
+      const filePath = path.join(cbmCacheDir, fileName);
+      if (fs.existsSync(filePath)) {
+        fs.rmSync(filePath, { force: true, recursive: true });
+        removed += 1;
+        console.log(`[gateway] removed stale CBM runtime state: ${filePath}`);
+      }
+    }
+
+    for (const entry of fs.readdirSync(cbmCacheDir)) {
+      if (/^(cbm-|.*\.(sock|lock|anc))$/.test(entry)) {
+        const filePath = path.join(cbmCacheDir, entry);
+        fs.rmSync(filePath, { force: true, recursive: true });
+        removed += 1;
+        console.log(`[gateway] removed stale CBM daemon state: ${filePath}`);
+      }
+    }
   }
 
   if (removed > 0) {
@@ -268,6 +299,14 @@ function startForwardProxy(
     if (redirectRootToAdmin && requestUrl.pathname === '/') {
       targetPath = '/admin';
     }
+    if (rewriteOriginToLoopback && requestUrl.pathname === '/api/browse') {
+      const requestedPath = requestUrl.searchParams.get('path');
+      const isEmptyOrStaleRoot = !requestedPath || requestedPath === '/' || requestedPath === '/root';
+      if (isEmptyOrStaleRoot) {
+        requestUrl.searchParams.set('path', '/workspace');
+        targetPath = `${requestUrl.pathname}?${requestUrl.searchParams.toString()}`;
+      }
+    }
     // The CBM UI's same-origin check only accepts an Origin/Referer whose host is
     // literally 127.0.0.1 (its own bind address) — it rejects the browser's
     // "localhost" Origin even though it resolves to the same address.
@@ -461,11 +500,15 @@ function main() {
   ensureDir(cbmCacheDir);
   resetGatewayPersistentState();
   cleanupStaleCodebaseMemoryDaemon();
+  // Re-apply the canonical workspace root to the mounted CBM cache before the
+  // upstream daemon serves the UI. The persistent CBM cache keeps a runtime
+  // selection outside the JSON config, so we must clear that stale state to avoid
+  // the browser reopening at /root after a restart.
+  configureCodebaseMemoryUi(cbmCacheDir, cbmUiBackendPort, cbmDefaultPath);
   // The public port is a proxy in front of the real CBM UI. The upstream UI
   // only accepts a matching Origin/Referer port, so we bind its real loopback
   // listener to a private internal port and proxy 9749 to it instead of trying
   // to self-proxy on the exact same port.
-  configureCodebaseMemoryUi(cbmCacheDir, cbmUiBackendPort, cbmDefaultPath);
 
   const adminConfig = buildAdminConfig();
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
@@ -473,7 +516,7 @@ function main() {
 
   const enableStartupAutoIndex = process.env.CBM_AUTO_INDEX_ENABLED === 'true';
   if (enableStartupAutoIndex) {
-    const startupIndexPath = requireEnv('CBM_AUTO_INDEX_PATH');
+    const startupIndexPath = normalizeContainerPath('CBM_AUTO_INDEX_PATH', '/workspace');
     autoIndexCodebaseMemory(cbmCacheDir, startupIndexPath);
   } else {
     console.log('[codebase-memory] startup auto-index is disabled; run index_repository manually for the first project index.');
