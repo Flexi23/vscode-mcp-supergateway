@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The C#-only extractor was generalized to a semantic dependency resolver that handles `.cs`, `.razor`, `.js`, `.ts`, and Markdown references, and the related rename/docs cleanup was completed to match the broader responsibilities.
 - The gateway now clears stale persistent state before startup and logs the admin UI and the final public RBAC MCP endpoint exactly once, using the environment-configured public port so rebuilds do not re-use stale gateway or CBM data.
 - The README, gateway config, and environment docs were updated to match the final runtime layout and the separate host-mount model for the gateway DB, CBM cache, and workspace volumes.
+- Renamed the SiYuan lockscreen env vars to `SIYUAN_LOCKSCREEN_CODE` and `SIYUAN_LOCKSCREEN_CODE_REQUIRED` so their semantics match the actual container lock-screen behavior rather than the generic access-code wording.
+- Pinned the Supergateway dependency versions in `package.json` to exact versions for reproducible builds and removed the ambiguity around the SiYuan lock-screen semantics in the local environment config.
+- Updated the CBM overview header to show the absolute host workspace path instead of the generic project-folder label, making the workspace root explicit in the dashboard.
 
 ## [2.2.0] - 2026-08-16
 ### Changed
@@ -32,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** the aggregated `markdown-vault` upstream (`@wirux/mcp-markdown-vault`) is replaced by a `siyuan-note` upstream (`siyuan-mcp`), talking over REST to a new `siyuan` Docker Compose service (image `b3log/siyuan`, port `6806`). `docker/gateway.config.json` and `src/gateway.ts`'s `buildAdminConfig()` inject `SIYUAN_HOST`/`SIYUAN_PORT`/`SIYUAN_TOKEN` instead of `VAULT_PATH` for that upstream.
 - **Breaking:** the local file-based vault subsystem is removed entirely. `src/services/vaultManager.ts` is deleted; a new `src/services/siyuanClient.ts` (`SiyuanClient`) talks to the SiYuan Kernel API (`readDoc`/`writeDoc`/`listNotebooks`) instead. `src/tools/lmstudioLoopback.ts`'s `lmstudio_update_vault_task` tool is replaced by `lmstudio_update_siyuan_task` (`doc_id` + `content`, writes via `SiyuanClient`), `src/services/loopbackWorkflow.ts`'s `LoopbackWorkflow` now reads task docs from SiYuan instead of vault files, and `src/server.ts` drops the `/api/vault/notes*` REST routes.
 - `docker-compose.yml`: the `gateway-vault` named volume and its `/app/vault` mount are removed (no longer needed). The `siyuan` service's workspace is now a host bind mount derived from `WORKSPACE_ROOT` instead of the `siyuan-workspace` named volume, so notebooks/docs are directly inspectable/backupable on the host. `gateway-data` is unaffected.
-- `.env.example` gained `SIYUAN_TOKEN`, `SIYUAN_ACCESS_AUTH_CODE`, and `WORKSPACE_ROOT`. `README.md`, `AGENT_INSTRUCTIONS.md`, and the architecture diagram/tables updated accordingly.
+- `.env.example` gained `SIYUAN_TOKEN`, `SIYUAN_LOCKSCREEN_CODE`, and `WORKSPACE_ROOT`. `README.md`, `AGENT_INSTRUCTIONS.md`, and the architecture diagram/tables updated accordingly.
 
 ## [2.1.0] - 2026-08-16
 ### Added

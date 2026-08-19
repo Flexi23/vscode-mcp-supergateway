@@ -30,6 +30,7 @@ const publicPort = requirePort('MCP_GATEWAY_PUBLIC_PORT');
 const cbmUiPort = requirePort('CBM_UI_PORT');
 const cbmUiBackendPort = requirePort('CBM_UI_BACKEND_PORT');
 const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
+const cbmHostWorkspaceDir = requireEnv('CBM_HOST_WORKSPACE_DIR');
 
 function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true });
@@ -335,7 +336,7 @@ function buildCbmOverviewHtml(): string {
   </head>
   <body>
     <div class="panel">
-      <h1>Project folders under ${cbmDefaultPath}</h1>
+      <h1>${cbmHostWorkspaceDir}</h1>
       <table>
         <thead><tr><th>Project</th><th>Path</th><th>Status</th><th>Actions</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -747,8 +748,8 @@ function main() {
     { env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 
-  const adminUiEndpointLog = `[gateway] admin UI: http://localhost:${adminUiPort}/admin`;
-  const publicEndpointLog = `[gateway] public RBAC-MCP endpoint: http://localhost:${publicPort}/mcp`;
+  const adminUiEndpointLog = `[gateway] Supergateway RBAC-MCP Admin UI: http://localhost:${adminUiPort}`;
+  const publicEndpointLog = `[gateway] Supergateway RBAC-MCP endpoint: http://localhost:${publicPort}/mcp`;
   const publicEndpointLogDelayMs = Number(process.env.PUBLIC_ENDPOINT_LOG_DELAY_MS ?? 25000);
   let adminUiEndpointLogged = false;
   let publicEndpointLogged = false;
