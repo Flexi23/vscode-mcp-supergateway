@@ -8,11 +8,11 @@
       "args": ["-y", "codebase-memory-mcp"]
     },
     {
-      "id": "csharp-semantic",
-      "namespace": "csharpsemantic",
+      "id": "semantic-bridge",
+      "namespace": "semanticbridge",
       "transport": "stdio",
       "command": "node",
-      "args": ["/app/dist/csharpSemanticMcp.js"],
+      "args": ["/app/dist/semanticBridgeMcp.js"],
       "env": {
         "CBM_DEFAULT_PATH": "/workspace"
       }

@@ -69,7 +69,7 @@ graph LR
     Proxy --> SemanticBridge
 
     click Supergateway "blob/main/src/gateway.ts" "Entry point: src/gateway.ts (main())"
-    click SemanticBridge "blob/main/src/csharpSemanticMcp.ts" "Entry point: src/csharpSemanticMcp.ts (semantic API bridge)"
+    click SemanticBridge "blob/main/src/semanticBridgeMcp.ts" "Entry point: src/semanticBridgeMcp.ts (semantic API bridge)"
     click Loopback "blob/main/src/server.ts" "Entry point: src/server.ts (startBackendServer)"
     click Proxy href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway" _blank
     click MCP href "https://www.npmjs.com/package/@mspstack/mcp-gateway" "npm: @mspstack/mcp-gateway (RBAC & tool access)" _blank
@@ -161,7 +161,7 @@ curl http://localhost:8080/ping     # -> ok
 docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
 ```
 
-The admin UI lives at <http://localhost:3100/admin>.
+The admin UI lives at <http://localhost:3100/admin>, and the dashboard (a tabbed view over the admin UI, Codebase Memory, and SiYuan) at <http://localhost:3100/dashboard> — both behind the admin port, not the public MCP port. `docker compose logs gateway` also prints both URLs on startup.
 
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
@@ -173,8 +173,8 @@ The admin UI lives at <http://localhost:3100/admin>.
 
 | Port | What it is |
 |---|---|
-| `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. |
-| `3100` | `@mspstack/mcp-gateway` admin UI + direct MCP endpoint. |
+| `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. SSE/MCP traffic only; the dashboard is not served here. |
+| `3100` | `@mspstack/mcp-gateway` admin UI (`/admin`) + direct MCP endpoint, and the human-facing dashboard (`/dashboard`, also the response for `/`). |
 | `8081` | Express LM Studio loopback backend (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`), started in-process via `startBackendServer()`. |
 | `9749` | `codebase-memory-mcp`'s own 3D graph-visualization UI (<http://localhost:9749>). Its coordination daemon only binds `127.0.0.1` and rejects cross-origin browser requests, so `gateway.ts` enables it via `CBM_CACHE_DIR/config.json` and reverse-proxies the published port to it, rewriting `Origin`/`Referer` to satisfy its same-origin check; override the port with `CBM_UI_PORT`. |
 
@@ -195,7 +195,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
 | `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), and opens `CBM_DEFAULT_PATH` in its UI; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
-| `csharp-semantic` | local bridge | Node | Exposes C# workspace/file enumeration and dependency graph extraction via the stdio MCP server in [`src/csharpSemanticMcp.ts`](src/csharpSemanticMcp.ts). It is the pattern for IDE-native capabilities: wrap VS Code / C# semantic APIs as a dedicated MCP tool surface, then let the gateway aggregate them behind one routing layer. |
+| `semantic-bridge` | local bridge | Node | Exposes both C# and TypeScript workspace/file enumeration plus dependency graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the pattern for IDE-native capabilities: wrap VS Code semantic APIs as a dedicated MCP tool surface, then let the gateway aggregate them behind one routing layer. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
@@ -209,7 +209,7 @@ Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.js
 - **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
 - **C# Semantic Edge Resolver:** Resolve cross-file C# dependencies in the VS Code C# language service and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
-- **Pattern: IDE native capabilities as MCP upstreams:** the gateway does not reach into VS Code directly. Instead, each IDE-specific capability is wrapped in its own MCP stdio bridge (for example [`src/csharpSemanticMcp.ts`](src/csharpSemanticMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `csharp_extract_dependency_graph`). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making semantic IDE features available to all clients through the same MCP interface.
+- **Pattern: IDE native capabilities as MCP upstreams:** the gateway does not reach into VS Code directly. Instead, each IDE-specific capability is wrapped in its own MCP stdio bridge (for example [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `typescript_extract_dependency_graph`, and friends). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making semantic IDE features available to all clients through the same MCP interface.
 - **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 

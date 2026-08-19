@@ -7,16 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Added a dedicated `csharp-semantic` MCP upstream that exposes `csharp_list_workspace_files` and `csharp_extract_dependency_graph` over stdio, using the VS Code C# language service when available and a file-based fallback otherwise.
+- The dashboard's "Codebase Memory" tab now opens a new `/cbm/overview` page instead of embedding the CBM UI directly: it lists the project folders discovered under the configured workspace root, each with an "Index" button (`POST /cbm/index`) to trigger indexing for just that directory, live status polling (`GET /cbm/index-status`), and the actual CBM graph UI embedded below. Indexing logic used by the old startup auto-index and this new per-directory button was consolidated into a single job-tracked `indexRepository()` helper.
+- Added a dedicated `semantic-bridge` MCP upstream that exposes both C# and TypeScript workspace and dependency tools over stdio, using the VS Code semantic APIs when available and file-based fallbacks otherwise.
 - Documented the IDE-native semantic bridge pattern in the architecture diagram and README: semantic providers are wrapped as MCP upstreams and then aggregated by the gateway instead of being reached directly from the container.
 - Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
 
 ### Changed
+- The dashboard tab label for the gateway entry was renamed from "Admin UI" to "Gateway" so the landing-page navigation matches the actual public-facing role of the MCP entry point.
+- The Codebase Memory overview page now hides the "Index" button for already indexed projects, shows a dedicated "Transfer semantic edges" action for indexed directories, and opens the 3D graph in a new browser tab via a direct link. The same action path is also called automatically after a successful repository index so semantic dependency edges are transferred without an extra manual step.
+- **Breaking:** the dashboard (`/dashboard`, and `/` as its default) moved from the public MCP port (`MCP_GATEWAY_PUBLIC_PORT`, e.g. `8080`) to the admin port (`ADMIN_UI_PORT`, e.g. `3100`), since the public port is meant for MCP client (SSE) traffic only, not human browsing. `main()` now logs the public MCP endpoint and the dashboard URL on startup.
+- `startForwardProxy()` gained a `stripFrameHeaders` option, now enabled on the Codebase Memory UI proxy: it strips the upstream's `X-Frame-Options`/`Content-Security-Policy` response headers, which otherwise blocked the CBM UI from being framed on a different origin/port (the dashboard iframe).
 - `docker-compose.yml` and `.env` now use explicit host bind-mount paths for the gateway data dir, Codebase Memory cache, and SiYuan workspace, with the GitLab API URL moved into the environment as well. This keeps runtime state and CBM cache independent and makes the config single-source-of-truth.
 - The host-side CBM cache variable was renamed to `CBM_HOST_CACHE_DIR` and the compose/service wiring now mounts that explicit host path at `/root/cbm-cache`, while the runtime container-side variable remains `CBM_CACHE_DIR` for the upstream itself.
 - `gateway.ts` now resets stale Codebase Memory runtime state (`config.json`, lockfiles, daemon directories, and `/tmp/cbm-daemon-*`) before startup so the UI defaults back to `/workspace` instead of reopening a stale `/root` browse root.
 - Startup auto-indexing is now opt-in via `CBM_AUTO_INDEX_ENABLED`; `CBM_AUTO_INDEX_PATH` is only required when that flag is `true`, so disabled mode no longer fails on a missing path.
 - The C#-only extractor was generalized to a semantic dependency resolver that handles `.cs`, `.razor`, `.js`, `.ts`, and Markdown references, and the related rename/docs cleanup was completed to match the broader responsibilities.
+- The gateway now clears stale persistent state before startup and logs the admin UI and the final public RBAC MCP endpoint exactly once, using the environment-configured public port so rebuilds do not re-use stale gateway or CBM data.
 - The README, gateway config, and environment docs were updated to match the final runtime layout and the separate host-mount model for the gateway DB, CBM cache, and workspace volumes.
 
 ## [2.2.0] - 2026-08-16

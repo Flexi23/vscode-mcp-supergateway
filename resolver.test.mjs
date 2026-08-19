@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 
 execSync('npm run build', { stdio: 'inherit' });
-const { SemanticDependencyResolver } = await import('./dist/services/semanticDependencyResolver.js');
+const { SemanticDependencyResolver, TypeScriptDependencyResolver } = await import('./dist/services/semanticDependencyResolver.js');
 
 test('collects and links .razor, .js, .ts and .md files', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'semantic-resolver-'));
@@ -32,4 +32,20 @@ test('collects and links .razor, .js, .ts and .md files', async () => {
   assert.ok(links.some((link) => link.source.endsWith('app.js') && link.target.endsWith('shared.js')));
   assert.ok(links.some((link) => link.source.endsWith('README.md') && link.target.endsWith('Pages/Demo.razor')));
   assert.ok(links.some((link) => link.source.endsWith('app.js') && link.target.endsWith('lib/utils.ts')));
+});
+
+test('TypeScriptDependencyResolver resolves import graph for TS files only', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-semantic-resolver-'));
+  fs.mkdirSync(path.join(root, 'src', 'ui'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'index.ts'), "import './ui/button';\nimport { formatDate } from './utils';\n\nconst value = formatDate(new Date());\nexport default value;\n");
+  fs.writeFileSync(path.join(root, 'src', 'utils.ts'), 'export function formatDate(date: Date) { return date.toISOString(); }\n');
+  fs.writeFileSync(path.join(root, 'src', 'ui', 'button.ts'), "import { formatDate } from '../utils';\nexport const button = formatDate(new Date());\n");
+
+  const resolver = new TypeScriptDependencyResolver(root);
+  const files = resolver.collectTypeScriptFiles(root);
+  const links = await resolver.extractTypeScriptEdgesFromFilesystem(root);
+
+  assert.ok(files.some((file) => file.fsPath.endsWith('index.ts')));
+  assert.ok(links.some((link) => link.source.endsWith('src/index.ts') && link.target.endsWith('src/utils.ts')));
+  assert.ok(links.some((link) => link.source.endsWith('src/ui/button.ts') && link.target.endsWith('src/utils.ts')));
 });

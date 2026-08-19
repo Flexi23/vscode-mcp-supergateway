@@ -158,8 +158,8 @@ function buildAdminConfig(): GatewayConfig {
 
 function buildDashboardHtml(activeTarget: string = 'admin') {
   const targets: Record<string, { label: string; url: string }> = {
-    admin: { label: 'Admin UI', url: `http://127.0.0.1:${adminUiPort}/admin` },
-    cbm: { label: 'Codebase Memory', url: `http://127.0.0.1:${cbmUiPort}/?tab=stats` },
+    admin: { label: 'MSPStack', url: `http://127.0.0.1:${adminUiPort}/admin` },
+    cbm: { label: 'CBM', url: '/cbm/overview' },
     siyuan: { label: 'SiYuan', url: 'http://127.0.0.1:6806/' },
   };
 
@@ -261,6 +261,126 @@ function buildDashboardHtml(activeTarget: string = 'admin') {
 </html>`;
 }
 
+// Project-picker landing page for the CBM dashboard tab: lists the same
+// project roots `autoIndexCodebaseMemory` would index, each with a button to
+// kick off indexing for just that directory, plus the actual graph UI below.
+function buildCbmOverviewHtml(): string {
+  const repoPaths = discoverProjectRoots(cbmDefaultPath);
+  const jobs = getIndexJobsSnapshot();
+
+  const rows = repoPaths
+    .map((repoPath) => {
+      const name = path.basename(repoPath) || 'workspace';
+      const encodedPath = encodeURIComponent(repoPath);
+      const status = jobs[repoPath]?.status ?? 'idle';
+      const isIndexed = status === 'success';
+      const indexButton = isIndexed ? '' : `<button type="button" class="index-button" data-path="${encodedPath}">Index</button>`;
+      const enrichButton = isIndexed
+        ? `<button type="button" class="semantic-button" data-path="${encodedPath}">Transfer semantic edges</button>`
+        : '';
+      const graphLink = isIndexed
+        ? `<a class="graph-link" href="http://127.0.0.1:${cbmUiPort}/" target="_blank" rel="noopener noreferrer">Open graph</a>`
+        : '';
+
+      return `<tr data-path="${encodedPath}">
+        <td>${name}</td>
+        <td class="path">${repoPath}</td>
+        <td class="status">${status}</td>
+        <td class="actions">
+          ${indexButton}
+          ${enrichButton}
+          ${graphLink}
+        </td>
+      </tr>`;
+    })
+    .join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codebase Memory — Project Overview</title>
+    <style>
+      body { margin: 0; font-family: "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; }
+      .panel { padding: 1rem 1.25rem; }
+      h1 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+      th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid rgba(148, 163, 184, 0.25); font-size: 0.9rem; }
+      td.path { color: #94a3b8; font-family: monospace; }
+      td.status { text-transform: capitalize; }
+      td.actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+      button.index-button, button.semantic-button {
+        padding: 0.35rem 0.9rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        background: #38bdf8;
+        color: #082f49;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.semantic-button {
+        background: #a78bfa;
+        color: #1f113d;
+      }
+      button.index-button:disabled, button.semantic-button:disabled { opacity: 0.5; cursor: default; }
+      a.graph-link {
+        color: #bae6fd;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      a.graph-link:hover { text-decoration: underline; }
+      iframe { width: 100%; height: 70vh; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 12px; background: white; }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <h1>Project folders under ${cbmDefaultPath}</h1>
+      <table>
+        <thead><tr><th>Project</th><th>Path</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <iframe title="codebase memory graph" src="http://127.0.0.1:${cbmUiPort}/?tab=stats"></iframe>
+    </div>
+    <script>
+      async function refreshStatus() {
+        const res = await fetch('/cbm/index-status');
+        const jobs = await res.json();
+        document.querySelectorAll('tr[data-path]').forEach((row) => {
+          const path = decodeURIComponent(row.dataset.path || '');
+          const job = jobs[path];
+          row.querySelector('.status').textContent = job ? job.status : 'idle';
+        });
+      }
+      document.querySelectorAll('.index-button').forEach((button) => {
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await fetch('/cbm/index?path=' + button.dataset.path, { method: 'POST' });
+          } finally {
+            button.disabled = false;
+            refreshStatus();
+          }
+        });
+      });
+      document.querySelectorAll('.semantic-button').forEach((button) => {
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            await fetch('/cbm/enrich?path=' + button.dataset.path, { method: 'POST' });
+          } finally {
+            button.disabled = false;
+            refreshStatus();
+          }
+        });
+      });
+      setInterval(refreshStatus, 2000);
+      refreshStatus();
+    </script>
+  </body>
+</html>`;
+}
+
 function startForwardProxy(
   port: number,
   targetPort: number,
@@ -269,6 +389,7 @@ function startForwardProxy(
     rewriteOriginToLoopback?: boolean;
     redirectRootToAdmin?: boolean;
     dashboardEnabled?: boolean;
+    stripFrameHeaders?: boolean;
   } = {},
 ) {
   const {
@@ -276,6 +397,7 @@ function startForwardProxy(
     rewriteOriginToLoopback = false,
     redirectRootToAdmin = false,
     dashboardEnabled = true,
+    stripFrameHeaders = false,
   } = options;
 
   const server = http.createServer((req, res) => {
@@ -291,6 +413,46 @@ function startForwardProxy(
       const target = requestUrl.searchParams.get('target') ?? 'admin';
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(buildDashboardHtml(target));
+      return;
+    }
+
+    if (req.method === 'GET' && dashboardEnabled && requestUrl.pathname === '/cbm/overview') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(buildCbmOverviewHtml());
+      return;
+    }
+
+    if (req.method === 'GET' && dashboardEnabled && requestUrl.pathname === '/cbm/index-status') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(getIndexJobsSnapshot()));
+      return;
+    }
+
+    if (req.method === 'POST' && dashboardEnabled && requestUrl.pathname === '/cbm/index') {
+      const requestedPath = requestUrl.searchParams.get('path') ?? '';
+      const allowedRoots = discoverProjectRoots(cbmDefaultPath);
+      if (!allowedRoots.includes(requestedPath)) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'unknown or disallowed project path' }));
+        return;
+      }
+      indexRepository(cbmCacheDir, requestedPath);
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'started', path: requestedPath }));
+      return;
+    }
+
+    if (req.method === 'POST' && dashboardEnabled && requestUrl.pathname === '/cbm/enrich') {
+      const requestedPath = requestUrl.searchParams.get('path') ?? '';
+      const allowedRoots = discoverProjectRoots(cbmDefaultPath);
+      if (!allowedRoots.includes(requestedPath)) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'unknown or disallowed project path' }));
+        return;
+      }
+      enrichRepositorySemanticEdges(cbmCacheDir, requestedPath);
+      res.writeHead(202, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'started', path: requestedPath }));
       return;
     }
 
@@ -324,7 +486,15 @@ function startForwardProxy(
         headers,
       },
       (upstreamResponse) => {
-        res.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+        const responseHeaders = { ...upstreamResponse.headers };
+        // Codebase Memory's own UI ships X-Frame-Options/CSP frame-ancestors that
+        // only allow same-origin framing, blocking it from our dashboard iframe
+        // (a different origin/port). Strip them on this proxy so embedding works.
+        if (stripFrameHeaders) {
+          delete responseHeaders['x-frame-options'];
+          delete responseHeaders['content-security-policy'];
+        }
+        res.writeHead(upstreamResponse.statusCode || 502, responseHeaders);
         upstreamResponse.pipe(res);
       },
     );
@@ -422,6 +592,71 @@ function discoverProjectRoots(workspaceRoot: string): string[] {
   return roots.length > 0 ? roots : [workspaceRoot];
 }
 
+type IndexJobStatus = 'indexing' | 'enriching' | 'success' | 'error';
+
+interface IndexJobState {
+  status: IndexJobStatus;
+  message?: string;
+  updatedAt: number;
+}
+
+const indexJobs = new Map<string, IndexJobState>();
+
+function getIndexJobsSnapshot(): Record<string, IndexJobState> {
+  return Object.fromEntries(indexJobs.entries());
+}
+
+// Indexes a single repo and tracks its progress in `indexJobs`, so both the
+// startup auto-index and the per-directory dashboard button can await/observe
+// the same underlying job without duplicating the spawn logic.
+function indexRepository(cacheDir: string, repoPath: string): Promise<void> {
+  const projectName = path.basename(repoPath) || 'workspace';
+  indexJobs.set(repoPath, { status: 'indexing', updatedAt: Date.now() });
+
+  return new Promise((resolve) => {
+    const child = spawn(
+      'npx',
+      ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', '--repo-path', repoPath, '--name', projectName, '--mode', 'moderate'],
+      { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
+    );
+
+    child.on('exit', async (code) => {
+      if (code === 0) {
+        console.log(`[codebase-memory] index completed for ${repoPath}`);
+        try {
+          await enrichRepositorySemanticEdges(cacheDir, repoPath);
+        } catch (error) {
+          console.warn(`[codebase-memory] C# edge enrichment failed for ${repoPath}:`, error);
+          indexJobs.set(repoPath, { status: 'success', message: 'indexed (edge enrichment failed)', updatedAt: Date.now() });
+        }
+        resolve();
+        return;
+      }
+
+      console.warn(`[codebase-memory] index exited for ${repoPath} with code ${code}`);
+      indexJobs.set(repoPath, { status: 'error', message: `exit code ${code}`, updatedAt: Date.now() });
+      resolve();
+    });
+  });
+}
+
+async function enrichRepositorySemanticEdges(cacheDir: string, repoPath: string): Promise<void> {
+  const projectName = path.basename(repoPath) || 'workspace';
+  indexJobs.set(repoPath, { status: 'enriching', message: `transferring semantic edges for ${projectName}`, updatedAt: Date.now() });
+
+  try {
+    await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
+    indexJobs.set(repoPath, { status: 'success', message: 'semantic edges transferred', updatedAt: Date.now() });
+  } catch (error) {
+    indexJobs.set(repoPath, {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'semantic edge transfer failed',
+      updatedAt: Date.now(),
+    });
+    throw error;
+  }
+}
+
 function autoIndexCodebaseMemory(cacheDir: string, workspaceRoot: string) {
   if (!fs.existsSync(workspaceRoot)) {
     console.warn(`[codebase-memory] auto-index skipped, path not found: ${workspaceRoot}`);
@@ -431,27 +666,8 @@ function autoIndexCodebaseMemory(cacheDir: string, workspaceRoot: string) {
   const repoPaths = discoverProjectRoots(workspaceRoot);
   console.log(`[codebase-memory] auto-indexing ${repoPaths.length} project root(s) under ${workspaceRoot}...`);
 
-  repoPaths.forEach((repoPath, index) => {
-    const projectName = path.basename(repoPath) || 'workspace';
-    const child = spawn(
-      'npx',
-      ['-y', 'codebase-memory-mcp', 'cli', 'index_repository', '--repo-path', repoPath, '--name', projectName, '--mode', 'moderate'],
-      { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
-    );
-
-    child.on('exit', async (code) => {
-      if (code === 0) {
-        console.log(`[codebase-memory] auto-index completed for ${repoPath} (${index + 1}/${repoPaths.length})`);
-        try {
-          await enrichCodebaseMemoryWithCSharpEdges(cacheDir, repoPath);
-        } catch (error) {
-          console.warn(`[codebase-memory] C# edge enrichment failed for ${repoPath}:`, error);
-        }
-        return;
-      }
-
-      console.warn(`[codebase-memory] auto-index exited for ${repoPath} with code ${code}`);
-    });
+  repoPaths.forEach((repoPath) => {
+    indexRepository(cacheDir, repoPath);
   });
 }
 
@@ -528,8 +744,84 @@ function main() {
   const gatewayProcess = spawn(
     'npx',
     ['-y', '@mspstack/mcp-gateway', '--port', String(adminPort), '--config', adminConfigPath, '--db-path', dbPath],
-    { env, stdio: 'inherit' },
+    { env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
+
+  const adminUiEndpointLog = `[gateway] admin UI: http://localhost:${adminUiPort}/admin`;
+  const publicEndpointLog = `[gateway] public RBAC-MCP endpoint: http://localhost:${publicPort}/mcp`;
+  const publicEndpointLogDelayMs = Number(process.env.PUBLIC_ENDPOINT_LOG_DELAY_MS ?? 25000);
+  let adminUiEndpointLogged = false;
+  let publicEndpointLogged = false;
+  let startupLogBuffer: string[] = [];
+  let startupLogFlushTimer: NodeJS.Timeout | undefined;
+
+  const flushStartupLogs = () => {
+    if (startupLogBuffer.length === 0) {
+      return;
+    }
+
+    const buffered = startupLogBuffer;
+    startupLogBuffer = [];
+    process.stderr.write(`${buffered.join('\n')}\n`);
+  };
+
+  const emitAdminUiEndpointLog = () => {
+    if (adminUiEndpointLogged) {
+      return;
+    }
+    adminUiEndpointLogged = true;
+    console.error(adminUiEndpointLog);
+  };
+
+  const emitPublicEndpointLog = () => {
+    if (publicEndpointLogged) {
+      return;
+    }
+    publicEndpointLogged = true;
+    if (startupLogFlushTimer) {
+      clearTimeout(startupLogFlushTimer);
+      startupLogFlushTimer = undefined;
+    }
+    flushStartupLogs();
+    console.error(publicEndpointLog);
+  };
+
+  const queueStartupLogs = (text: string) => {
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .filter((line) => !line.includes('[gateway] MCP endpoint') && !line.includes('[gateway] admin UI') && !line.includes('[gateway] serving ') && !line.includes('[gateway] public RBAC-MCP endpoint'));
+
+    if (lines.length === 0) {
+      return;
+    }
+
+    startupLogBuffer.push(...lines);
+
+    if (startupLogFlushTimer) {
+      clearTimeout(startupLogFlushTimer);
+    }
+
+    startupLogFlushTimer = setTimeout(() => {
+      if (!publicEndpointLogged) {
+        flushStartupLogs();
+      }
+    }, 2500);
+  };
+
+  if (gatewayProcess.stdout) {
+    gatewayProcess.stdout.on('data', (chunk: Buffer | string) => {
+      queueStartupLogs(chunk.toString());
+    });
+  }
+
+  if (gatewayProcess.stderr) {
+    gatewayProcess.stderr.setEncoding('utf8');
+    gatewayProcess.stderr.on('data', (chunk: Buffer | string) => {
+      queueStartupLogs(chunk.toString());
+    });
+  }
 
   gatewayProcess.on('exit', (code) => {
     console.log(`mcp-gateway exited with code ${code}`);
@@ -539,10 +831,21 @@ function main() {
   // The CBM UI only listens on loopback in the container; expose it via a
   // public proxy so 9749 is reachable from the host while preserving the same
   // Origin/Referer rewrite required by its browser-side checks.
-  startForwardProxy(cbmUiPort, cbmUiBackendPort, { rewriteOriginToLoopback: true, dashboardEnabled: false });
-  startForwardProxy(adminUiPort, adminPort, { redirectRootToAdmin: true, dashboardEnabled: false });
-  startForwardProxy(publicPort, adminPort);
+  startForwardProxy(cbmUiPort, cbmUiBackendPort, { rewriteOriginToLoopback: true, dashboardEnabled: false, stripFrameHeaders: true });
+  // The dashboard lives behind the admin port, not the public MCP port: the
+  // latter is meant for MCP client (SSE) traffic only, not human browsing.
+  startForwardProxy(adminUiPort, adminPort, { dashboardEnabled: true });
+  startForwardProxy(publicPort, adminPort, { dashboardEnabled: false });
   startBackendServer(Number(process.env.BACKEND_PORT || 8081));
+
+  setTimeout(() => {
+    if (!adminUiEndpointLogged) {
+      emitAdminUiEndpointLog();
+    }
+    if (!publicEndpointLogged) {
+      emitPublicEndpointLog();
+    }
+  }, publicEndpointLogDelayMs);
 }
 
 main();

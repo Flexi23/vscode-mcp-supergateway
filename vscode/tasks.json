@@ -10,6 +10,19 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "rebuild supergateway",
+			"type": "shell",
+			"command": "docker",
+			"args": [
+				"compose",
+				"-f",
+				"${workspaceFolder}/vscode-mcp-supergateway/docker-compose.yml",
+				"build",
+				"--no-cache"
+			],
+			"problemMatcher": []
+		},
+		{
 			"label": "start supergateway",
 			"type": "shell",
 			"command": "docker",
@@ -19,7 +32,8 @@
 				"${workspaceFolder}/vscode-mcp-supergateway/docker-compose.yml",
 				"up",
 				"-d",
-				"--build"
+				"--build",
+				"--force-recreate"
 			],
 			"runOptions": {
 				"runOn": "folderOpen"

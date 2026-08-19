@@ -225,7 +225,7 @@ export class SemanticDependencyResolver {
     return undefined;
   }
 
-  private toGraphPath(uri: GraphUri): string {
+  protected toGraphPath(uri: GraphUri): string {
     if (this.workspaceRoot) {
       const relative = path.relative(this.workspaceRoot, uri.fsPath).replace(/\\/g, '/');
       if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
@@ -236,7 +236,7 @@ export class SemanticDependencyResolver {
     return path.basename(uri.fsPath);
   }
 
-  private dedupeNodes(nodes: readonly GraphUri[]): GraphUri[] {
+  protected dedupeNodes(nodes: readonly GraphUri[]): GraphUri[] {
     const seen = new Set<string>();
     const unique: GraphUri[] = [];
 
@@ -251,7 +251,7 @@ export class SemanticDependencyResolver {
     return unique;
   }
 
-  private dedupeLinks(links: readonly GraphLink[]): GraphLink[] {
+  protected dedupeLinks(links: readonly GraphLink[]): GraphLink[] {
     const seen = new Set<string>();
     const unique: GraphLink[] = [];
 
@@ -266,7 +266,7 @@ export class SemanticDependencyResolver {
     return unique;
   }
 
-  private chunk<T>(items: readonly T[], size: number): T[][] {
+  protected chunk<T>(items: readonly T[], size: number): T[][] {
     const result: T[][] = [];
     for (let index = 0; index < items.length; index += size) {
       result.push(items.slice(index, index + size) as T[]);
@@ -438,7 +438,7 @@ export class SemanticDependencyResolver {
     return this.dedupeLinks(fileLinks.filter((link) => link.source !== link.target));
   }
 
-  private resolveReferenceTarget(filePath: string, value: string): string | undefined {
+  protected resolveReferenceTarget(filePath: string, value: string): string | undefined {
     const normalized = value.trim().replace(/^['"]|['"]$/g, '').replace(/[?#].*$/, '');
     if (!normalized || normalized.startsWith('http:') || normalized.startsWith('https:') || normalized.startsWith('mailto:') || normalized.startsWith('data:') || normalized.startsWith('#')) {
       return undefined;
@@ -464,7 +464,7 @@ export class SemanticDependencyResolver {
     return undefined;
   }
 
-  private resolveComponentTarget(filePath: string, componentName: string): string | undefined {
+  protected resolveComponentTarget(filePath: string, componentName: string): string | undefined {
     const baseDir = path.dirname(filePath);
     const names = [componentName, componentName.replace(/\./g, '/')];
     for (const name of names) {
@@ -483,5 +483,104 @@ export class SemanticDependencyResolver {
     }
 
     return undefined;
+  }
+}
+
+export class TypeScriptDependencyResolver extends SemanticDependencyResolver {
+  collectTypeScriptFiles(rootDir: string): GraphUri[] {
+    if (!rootDir || !fs.existsSync(rootDir)) {
+      return [];
+    }
+
+    const results: GraphUri[] = [];
+    const stack = [rootDir];
+
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current || !fs.existsSync(current)) {
+        continue;
+      }
+
+      const stat = fs.statSync(current);
+      if (stat.isDirectory()) {
+        for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+          const fullPath = path.join(current, entry.name);
+          if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'bin' || entry.name === 'obj') {
+            continue;
+          }
+          stack.push(fullPath);
+        }
+        continue;
+      }
+
+      if (this.isSupportedTypeScriptFile(current)) {
+        results.push({ fsPath: current, toString: () => `file://${current}` });
+      }
+    }
+
+    return results;
+  }
+
+  async extractTypeScriptEdgesFromFilesystem(rootDir: string, onProgress?: (message: string, percent: number, processed: number, total: number) => void): Promise<GraphLink[]> {
+    const files = this.collectTypeScriptFiles(rootDir);
+    if (files.length === 0) {
+      return [];
+    }
+
+    const links = new Map<string, GraphLink>();
+    const total = files.length;
+
+    for (let index = 0; index < files.length; index += 1) {
+      const file = files[index];
+      const fileLinks = this.extractLinksFromTypeScriptFile(file.fsPath);
+      for (const link of fileLinks) {
+        const key = `${link.source}\u0000${link.target}`;
+        if (!links.has(key)) {
+          links.set(key, link);
+        }
+      }
+
+      const percent = Math.round(((index + 1) / total) * 100);
+      onProgress?.(`[TypeScriptDependencyResolver] processing TypeScript dependency graph: ${index + 1}/${total} (${percent}%)`, percent, index + 1, total);
+    }
+
+    return Array.from(links.values());
+  }
+
+  private isSupportedTypeScriptFile(filePath: string): boolean {
+    const extension = path.extname(filePath).toLowerCase();
+    return ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts'].includes(extension);
+  }
+
+  private extractLinksFromTypeScriptFile(filePath: string): GraphLink[] {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const source = this.toGraphPath({ fsPath: filePath, toString: () => filePath });
+    const fileLinks: GraphLink[] = [];
+
+    const addLink = (candidate: string | undefined) => {
+      if (!candidate) {
+        return;
+      }
+
+      const resolved = this.resolveReferenceTarget(filePath, candidate);
+      if (!resolved) {
+        return;
+      }
+
+      const target = this.toGraphPath({ fsPath: resolved, toString: () => resolved });
+      if (!target || source === target) {
+        return;
+      }
+
+      fileLinks.push({ source, target, weight: 1 });
+    };
+
+    const importPattern = /(?:import|export)\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)|require\(\s*['"]([^'"]+)['"]\s*\)/g;
+    for (const match of content.matchAll(importPattern)) {
+      const candidate = match[1] ?? match[2] ?? match[3];
+      addLink(candidate);
+    }
+
+    return this.dedupeLinks(fileLinks);
   }
 }
