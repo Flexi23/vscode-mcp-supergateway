@@ -67,3 +67,5 @@ test('SemanticDependencyResolver accepts TypeScript-only repositories as semanti
   assert.ok(links.some((link) => link.source.endsWith('src/index.ts') && link.target.endsWith('src/utils.ts')));
   assert.ok(links.some((link) => link.source.endsWith('src/ui/button.ts') && link.target.endsWith('src/utils.ts')));
 });
+
+

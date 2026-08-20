@@ -31,6 +31,7 @@ When a user requests a task:
 *   **Commit Discipline:** Git commits must **NEVER** be created unless explicitly confirmed or requested by me (the user). This is a critical, non-negotiable constraint on process execution.
 *   **Documentation Aesthetics:** All generated documentation *must* be visually engaging and professional. Utilize markdown features such as emojis (`✨`, `🚀`), embed diagrams using Mermaid syntax (`graph TD;...`), and ensure all internal references to file paths are fully navigable/hyperlinked for convenience.
 *   **Commit History:** Ensure that all commits are descriptive and adhere strictly to the versioning specified in \`CHANGELOG.md\` when pushing changes.
+*   **Versioned changelog entries are historical:** Once a versioned release section in `CHANGELOG.md` has been written and the version has been released, do not rewrite, reorder, or retroactively patch that historical wording. The changelog is the record of what happened; if a correction is needed, add a later note or a new release entry instead of mutating the old versioned record.
 
 ## Environment Variables
 
@@ -44,5 +45,4 @@ When a user requests a task:
 *   **`GITLAB_PERSONAL_ACCESS_TOKEN`**: set in `.env` (copy from `.env.example`). Read by `src/gateway.ts` and injected into the `gitlab` upstream's env before the admin config is written.
 *   The `gateway` service runs [`@mspstack/mcp-gateway`](https://www.npmjs.com/package/@mspstack/mcp-gateway) ("MSPStack Gateway") — a third-party MCP aggregator that normally also does OAuth/RBAC/secret-store management. We only use its core "one endpoint, many MCP servers" feature, started with `DEV_ALLOW_UNAUTHENTICATED=true` (localhost-dev only — the package refuses to start without that flag or a real auth method). See README.md "What is `@mspstack/mcp-gateway`?" for details.
 *   `@mspstack/mcp-gateway` requires Node ≥24 — do not downgrade the Dockerfile's base images to `node:20`.
-*   There is no host-side script anymore (`vscode/supergateway.ps1` was removed in v2.0.0, "make Docker the only runtime, drop host scripting and CLI"). Don't reference it in new docs or tasks.
 *   **SiYuan Note:** `docker/gateway.config.json` configures the `siyuan-note` upstream, talking over REST to the `siyuan` Docker Compose service (image `b3log/siyuan`, port from `SIYUAN_PORT` in `.env`). Requires `SIYUAN_TOKEN` and `SIYUAN_ACCESS_AUTH_CODE` in `.env`, and `SIYUAN_WORKSPACE_DIR` (a host path bind-mounted as the SiYuan workspace) — see `.env.example`.

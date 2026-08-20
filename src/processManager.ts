@@ -9,8 +9,8 @@ export class ProcessManager {
   private readonly workspaceRoot: string;
 
   constructor(configPath?: string) {
-    this.workspaceRoot = path.resolve(path.dirname(configPath || path.join(process.cwd(), 'vscode', 'supergateway.config.json')));
-    this.configPath = configPath ? path.resolve(configPath) : path.join(this.workspaceRoot, 'vscode', 'supergateway.config.json');
+    this.workspaceRoot = path.resolve(path.dirname(configPath || path.join(process.cwd(), 'docker', 'gateway.config.json')));
+    this.configPath = configPath ? path.resolve(configPath) : path.join(this.workspaceRoot, 'docker', 'gateway.config.json');
   }
 
   private getConfig() {

@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
 
 ### Changed
+- Refactored the monolithic startup flow into dedicated modules for gateway config, Codebase Memory setup, dashboard rendering, startup-log classification, and embedded proxy handling so the runtime stays easier to reason about and maintain.
+- Replaced brittle raw string comparisons with a structured startup log classifier that recognizes upstream connection events and leaves unrelated gateway chatter in plain log output.
+- Kept the embedded reverse-layer architecture but cleaned up the runtime config object and route handling into explicit dashboard and CBM proxy helpers without splitting the gateway into a separate service.
+- Polished the console-like dashboard branding by increasing the SUPERGATE header prominence and keeping the terminal aesthetic consistent across the gateway UI.
+- Fixed the Docker image build by pinning TypeScript to a published version that resolves correctly in the Node 24 runtime environment, preventing the `npm ci --omit=dev` failure during image creation.
 - The dashboard tab label for the gateway entry was renamed from "Admin UI" to "Gateway" so the landing-page navigation matches the actual public-facing role of the MCP entry point.
 - The Codebase Memory overview page now hides the "Index" button for already indexed projects, shows a dedicated "Transfer semantic edges" action for indexed directories, and opens the 3D graph in a new browser tab via a direct link. The same action path is also called automatically after a successful repository index so semantic dependency edges are transferred without an extra manual step.
 - **Breaking:** the dashboard (`/dashboard`, and `/` as its default) moved from the public MCP port (`MCP_GATEWAY_PUBLIC_PORT`, e.g. `8080`) to the admin port (`ADMIN_UI_PORT`, e.g. `3100`), since the public port is meant for MCP client (SSE) traffic only, not human browsing. `main()` now logs the public MCP endpoint and the dashboard URL on startup.
