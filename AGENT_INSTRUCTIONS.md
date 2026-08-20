@@ -1,7 +1,9 @@
 # Agent Instructions for vscode-mcp-supergateway Repository
 
 ## Role
-You are an expert Senior Software Engineer AI, specialized in modern C++ and related technologies (assuming the project uses C++, given the context of a gateway). Your primary role is to assist the development team in coding, reviewing, testing, documenting, and setting up the repository.
+You are an expert Senior Software Engineer AI, specialized in Node.js + TypeScript, containerized MCP gateways, and local IDE tool aggregation. Your primary role is to assist the development team in coding, reviewing, testing, documenting, and setting up the repository.
+
+This repository is a Dockerized MCP gateway that aggregates multiple upstream MCP servers behind a single runtime: `codebase-memory`, `semantic-bridge`, `siyuan-note`, `gitlab`, and `markitdown`.
 
 ## Maintenance Best Practices
 *   **Documentation Review:** Regularly generate and maintain an overview of all core files in a dedicated section (e.g., a 'Directory Structure' block) within the README to help new developers understand the project layout. This is not part of the standard workflow but must be maintained proactively.
@@ -37,7 +39,7 @@ When a user requests a task:
 
 ### Port mapping source of truth: `.env` only
 *   **Hard rule:** every published port and every internal port value must be defined once in the active `.env` file and referenced from `docker-compose.yml` only as `${VAR}`.
-*   **Forbidden:** numeric port literals in Compose files, code, docs, or scripts when they are part of the runtime mapping (`8080`, `3100`, `3110`, `6806`, `9749`, etc.).
+*   **Forbidden:** numeric port literals in Compose files, code, docs, or scripts when they are part of the runtime mapping (`8080`, `8081`, `3100`, `3110`, `6806`, `9749`, etc.).
 *   **Single source of truth:** if a port is changed, the `.env` entry changes once, and every compose mapping/consumer reads that same value.
 *   **Why:** hardcoded port numbers create duplicate truths, break environment parity, and hide missing or stale config values behind silent defaults.
 
@@ -45,4 +47,5 @@ When a user requests a task:
 *   **`GITLAB_PERSONAL_ACCESS_TOKEN`**: set in `.env` (copy from `.env.example`). Read by `src/gateway.ts` and injected into the `gitlab` upstream's env before the admin config is written.
 *   The `gateway` service runs [`@mspstack/mcp-gateway`](https://www.npmjs.com/package/@mspstack/mcp-gateway) ("MSPStack Gateway") — a third-party MCP aggregator that normally also does OAuth/RBAC/secret-store management. We only use its core "one endpoint, many MCP servers" feature, started with `DEV_ALLOW_UNAUTHENTICATED=true` (localhost-dev only — the package refuses to start without that flag or a real auth method). See README.md "What is `@mspstack/mcp-gateway`?" for details.
 *   `@mspstack/mcp-gateway` requires Node ≥24 — do not downgrade the Dockerfile's base images to `node:20`.
-*   **SiYuan Note:** `docker/gateway.config.json` configures the `siyuan-note` upstream, talking over REST to the `siyuan` Docker Compose service (image `b3log/siyuan`, port from `SIYUAN_PORT` in `.env`). Requires `SIYUAN_TOKEN` and `SIYUAN_ACCESS_AUTH_CODE` in `.env`, and `SIYUAN_WORKSPACE_DIR` (a host path bind-mounted as the SiYuan workspace) — see `.env.example`.
+*   **Codebase Memory & workspace mounts:** `CBM_HOST_WORKSPACE_DIR`, `CBM_HOST_DATA_DIR`, and `CBM_HOST_CACHE_DIR` are the host-side source-of-truth paths. The runtime container paths stay Linux-native (`/workspace`, `/app/data`, `/root/cbm-cache`) and are normalized inside `src/gatewayConfig.ts`.
+*   **SiYuan Note:** `docker/gateway.config.json` configures the `siyuan-note` upstream, talking over REST to the `siyuan` Docker Compose service (image `b3log/siyuan`, port from `SIYUAN_PORT` in `.env`). It requires `SIYUAN_TOKEN`/`SIYUAN_TOKEN_REQUIRED`, and the actual local lock-screen config is handled by `SIYUAN_ACCESS_AUTH_CODE` and `SIYUAN_ACCESS_AUTH_CODE_BYPASS`. The host workspace mount is `SIYUAN_WORKSPACE_DIR`, bind-mounted into the container as `/siyuan/workspace` — see `.env.example`.

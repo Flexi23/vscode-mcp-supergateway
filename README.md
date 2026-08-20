@@ -16,7 +16,7 @@ As MCP usage grows, managing multiple disjointed MCP servers across different cl
 
 ## 🏗 Architecture
 
-Everything except your IDE and LM Studio runs inside Docker — the containers bring their own Node.js, Python, and all four upstream MCP servers.
+Everything except your IDE and LM Studio runs inside Docker — the containers bring their own Node.js, Python, and the current set of five upstream MCP servers.
 
 ```mermaid
 graph LR
@@ -121,8 +121,8 @@ Then edit [`.env`](.env.example):
 | `GITLAB_PERSONAL_ACCESS_TOKEN` | for the `gitlab` upstream | Injected into the `gitlab` upstream by [`src/gateway.ts`](src/gateway.ts). Without it that upstream fails to connect and its tools are missing from the admin UI. |
 | `SIYUAN_TOKEN` | optional for the `siyuan-note` upstream | SiYuan API token (SiYuan: Settings -> About -> API Token). For local/dev mode you can leave it empty and set `SIYUAN_TOKEN_REQUIRED=false`; the upstream then talks to the kernel without an `Authorization` header. |
 | `SIYUAN_TOKEN_REQUIRED` | optional | When set to `true`, the gateway warns if the token is empty or a placeholder; otherwise token auth is disabled and the upstream works without one. |
-| `SIYUAN_LOCKSCREEN_CODE` | optional for the `siyuan` service | Lock-screen password for the `siyuan` container's own web UI (<http://localhost:6806>); the container refuses to start when `SIYUAN_LOCKSCREEN_CODE_REQUIRED=true` and no code is configured. |
-| `SIYUAN_LOCKSCREEN_CODE_REQUIRED` | optional | Set to `true` when the SiYuan container should enforce its lock-screen code; set to `false` for the local no-auth dev setup. |
+| `SIYUAN_ACCESS_AUTH_CODE` | optional for the `siyuan` service | Lock-screen / access password for the SiYuan container's own web UI at <http://localhost:6806>. This is the variable the current compose stack consumes. |
+| `SIYUAN_ACCESS_AUTH_CODE_BYPASS` | optional | Set to `true` to allow the local SiYuan container to start without an explicit auth code in a dev setup. |
 | `SIYUAN_WORKSPACE_DIR` | **required** | Absolute host path to the SiYuan workspace directory, mounted directly at `/siyuan/workspace` inside the `siyuan` container. This is intentionally independent from the Codebase Memory paths. |
 | `CBM_HOST_DATA_DIR` | **required** | Absolute host path for the gateway runtime data directory (the `gateway.db` and admin config), mounted into the `gateway` container at `/app/data`. This is separate from the CBM cache. |
 | `CBM_HOST_WORKSPACE_DIR` | **required** | Absolute host path on the machine that is mounted read-only into the `gateway` container at `/workspace`. This is the host-side source for the workspace tree Codebase Memory should browse. |
@@ -162,7 +162,7 @@ curl http://localhost:8080/ping     # -> ok
 docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
 ```
 
-The admin UI lives at <http://localhost:3100/admin>, and the direct tabbed entry point is <http://localhost:3100/?tab=admin> (or `?tab=cbm` / `?tab=siyuan`). The public MCP endpoint remains on port `8080`; the admin UI and tab navigation stay on port `3100`.
+The admin UI lives at <http://localhost:3100/admin>, and the direct tabbed entry point is <http://localhost:3100/?tab=admin> (or `?tab=cbm` / `?tab=siyuan`). The public MCP endpoint remains on port `8080`; the admin UI and tab navigation stay on port `3100`. The gateway also exposes the LM Studio loopback backend on `8081` and the Codebase Memory graph UI on `9749` as noted below.
 
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
@@ -191,7 +191,7 @@ The LM Studio loopback's `lmstudio_update_siyuan_task` tool reads/writes SiYuan 
 
 ## 🔌 Configured Upstreams
 
-All four run inside the `gateway` container; the runtime column only says which language runtime the image provides for them.
+All five upstreams run inside the `gateway` container; the runtime column only says which language runtime the image provides for them.
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
@@ -201,7 +201,7 @@ All four run inside the `gateway` container; the runtime column only says which 
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
 | `markitdown` | [`markitdown-mcp`](https://pypi.org/project/markitdown-mcp/) | Python | Exposes a single tool, `convert_to_markdown(uri)`, for `http:`, `https:`, `file:`, and `data:` URIs. |
 
-Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json). The `siyuan` service itself (image `b3log/siyuan`) is defined in [`docker-compose.yml`](docker-compose.yml) and also publishes its own web UI at <http://localhost:6806>; set `SIYUAN_LOCKSCREEN_CODE` in `.env` and set `SIYUAN_LOCKSCREEN_CODE_REQUIRED=true` to lock it down.
+Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.json). The `siyuan` service itself (image `b3log/siyuan`) is defined in [`docker-compose.yml`](docker-compose.yml) and also publishes its own web UI at <http://localhost:6806>. If you want the SiYuan lock screen enabled, set the current compose variables `SIYUAN_ACCESS_AUTH_CODE` and `SIYUAN_ACCESS_AUTH_CODE_BYPASS` in `.env` accordingly.
 
 ### Semantic Dependency Resolver
 
@@ -275,34 +275,34 @@ docker compose up -d --build
 
 ## 🗺 Roadmap & Future Plan
 
-### Phase 1: MVP & Core Gateway (Current)
+### Current status: live gateway + semantic bridge + loopback
 - [x] Basic stdio / SSE transport routing.
-- [x] Multi-backend server orchestration (Codebase Memory, GitLab, SiYuan Note).
-- [x] Initial agent-assisted development groundwork.
+- [x] Multi-backend server orchestration for Codebase Memory, semantic bridge, GitLab, SiYuan Note, and MarkItDown.
+- [x] In-process Express loopback backend at `8081` for LM Studio-powered task and document flows.
+- [x] IDE-native semantic bridge exposing C# and TypeScript dependency graph tools via a dedicated MCP upstream.
+- [x] Automatic stale-state reset for gateway and Codebase Memory runtime data before startup.
+- [x] Per-upstream startup log grouping and runtime tool discovery with the final tool catalog only emitted after the admin UI appears.
 
-### Phase 2: Host-Side VS Code Semantic Bridge (Next)
-- [ ] Build a dedicated VS Code extension or host-side bridge that owns the language-service lifecycle and exposes semantic queries as MCP stdio servers.
-- [ ] Route semantic requests through the same gateway pattern used for existing upstreams; each semantic domain is a dedicated upstream, not a direct Docker-only dependency.
-- [ ] Expose typed tools such as `csharp_list_workspace_files`, `csharp_extract_dependency_graph`, `typescript_list_workspace_files`, and `typescript_extract_dependency_graph` from the host side.
-- [ ] Extend the same pattern to Razor and JavaScript/TypeScript symbol and reference queries so the graph includes UI/view semantics as well as backend semantics.
-- [ ] Add explicit Markdown reference extraction (`markdown_find_links`, `markdown_extract_reference_map`, `markdown_resolve_local_links`) so the semantic layer can connect prose, ADRs, docs, and code via structured references.
-- [ ] Keep the Docker gateway as the aggregator and policy layer while the VS Code host remains the semantic data provider.
-- [ ] Add a fallback path for non-IDE or non-C# environments that uses file-level dependency heuristics instead of Roslyn semantic data.
+### Next improvements
+- [ ] Harden the semantic bridge for larger workspaces and more file types with finer-grained indexing and caching.
+- [ ] Expand graph normalization and trace ingestion across docs, code, and UI/component references.
+- [ ] Add stronger permission checks around destructive SiYuan and repository-index operations.
+- [ ] Build more specialized LM Studio loopback tools for ADR generation, PR summarization, and agent task orchestration.
 
 ### Phase 3: Unified Semantic Layer (Roslyn + Razor + JS + Docs)
-- [ ] Treat the IDE semantic stack as a single capability family: C#, Razor, JavaScript/TypeScript, and Markdown reference-aware analysis.
-- [ ] Build shared graph normalization so each semantic domain emits the same edges and metadata shape (`source`, `target`, `kind`, `uri`, `range`, `symbol`, `referenceType`).
-- [ ] Preserve language-specific nuance: Roslyn for C#, Razor symbol resolution for `.razor`, TypeScript language service for JS/TS, and markdown link/reference parsing for docs.
-- [ ] Feed the unified semantic graph into the same codebase-memory pipeline so the knowledge graph can reason across code and documentation, not only raw file names.
+- [x] Treat the IDE semantic stack as a single capability family: C#, Razor, JavaScript/TypeScript, and Markdown reference-aware analysis.
+- [x] Build shared graph normalization so each semantic domain emits the same edges and metadata shape (`source`, `target`, `kind`, `uri`, `range`, `symbol`, `referenceType`).
+- [x] Preserve language-specific nuance: Roslyn for C#, Razor symbol resolution for `.razor`, TypeScript language service for JS/TS, and markdown link/reference parsing for docs.
+- [x] Feed the unified semantic graph into the same codebase-memory pipeline so the knowledge graph can reason across code and documentation, not only raw file names.
 - [ ] Add cross-domain queries such as “what docs mention this component?” or “which C# symbol owns this Razor binding?”
 
 ### Phase 4: LM Studio Loopback & Context Worker
-- [ ] Implement local LM Studio MCP tool wrapper (`summarize_diff`, `generate_adr`).
-- [ ] Add zero-blocking async tool handling for local inference.
+- [x] Implement local LM Studio MCP tool wrapper (`summarize_diff`, `generate_adr`, and the SiYuan task update flow).
+- [x] Add async tool handling for local inference without blocking gateway startup.
 - [ ] Graceful fallback & timeout management when local GPUs are under heavy load.
 
 ### Phase 5: SiYuan Note & Task Management Enhancements
-- [ ] Structured task/ADR documents in SiYuan, driven by the `siyuan-note` upstream and `lmstudio_update_siyuan_task`.
+- [x] Structured task/ADR documents in SiYuan, driven by the `siyuan-note` upstream and `lmstudio_update_siyuan_task`.
 - [ ] Agent scope security layer (permission checks around destructive SiYuan operations).
 - [ ] Automated context bundle generator for Copilot prompts.
 
