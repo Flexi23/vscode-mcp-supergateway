@@ -5,12 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.3.0] - 2026-08-20
 ### Added
 - The dashboard's "Codebase Memory" tab now opens a new `/cbm/overview` page instead of embedding the CBM UI directly: it lists the project folders discovered under the configured workspace root, each with an "Index" button (`POST /cbm/index`) to trigger indexing for just that directory, live status polling (`GET /cbm/index-status`), and the actual CBM graph UI embedded below. Indexing logic used by the old startup auto-index and this new per-directory button was consolidated into a single job-tracked `indexRepository()` helper.
 - Added a dedicated `semantic-bridge` MCP upstream that exposes both C# and TypeScript workspace and dependency tools over stdio, using the VS Code semantic APIs when available and file-based fallbacks otherwise.
 - Documented the IDE-native semantic bridge pattern in the architecture diagram and README: semantic providers are wrapped as MCP upstreams and then aggregated by the gateway instead of being reached directly from the container.
 - Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
+- The startup log now waits for the gateway admin UI line before printing the final tool catalog, then groups discovered tools by upstream using normalized namespace/separator matching so the output shows the real exposed tool names instead of wildcard placeholders.
+- Added ffmpeg to the runtime image so the bundled MarkItDown MCP upstream can handle media conversion in a self-contained container setup.
 
 ### Changed
 - Refactored the monolithic startup flow into dedicated modules for gateway config, Codebase Memory setup, dashboard rendering, startup-log classification, and embedded proxy handling so the runtime stays easier to reason about and maintain.
@@ -32,13 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed the SiYuan lockscreen env vars to `SIYUAN_LOCKSCREEN_CODE` and `SIYUAN_LOCKSCREEN_CODE_REQUIRED` so their semantics match the actual container lock-screen behavior rather than the generic access-code wording.
 - Pinned the Supergateway dependency versions in `package.json` to exact versions for reproducible builds and removed the ambiguity around the SiYuan lock-screen semantics in the local environment config.
 - Updated the CBM overview header to show the absolute host workspace path instead of the generic project-folder label, making the workspace root explicit in the dashboard.
-
-## [2.3.0] - 2026-08-20
-### Added
-- The startup log now waits for the gateway admin UI line before printing the final tool catalog, then groups discovered tools by upstream using normalized namespace/separator matching so the output shows the real exposed tool names instead of wildcard placeholders.
-- Added ffmpeg to the runtime image so the bundled MarkItDown MCP upstream can handle media conversion in a self-contained container setup.
-
-### Changed
 - Reworked the startup log queue to carry caller and stream metadata so each emitted line is identifiable in the console output while keeping classification stable.
 - Removed the transport column from the final tool summary and render the grouped tool list in a compact per-upstream layout after the public/admin URLs.
 - Kept the runtime gateway config and boot flow separated by concern while preserving the embedded reverse-layer approach.
