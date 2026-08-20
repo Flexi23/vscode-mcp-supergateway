@@ -90,7 +90,7 @@ export const formatToolCatalogTable = (rows: ToolCatalogRow[]): string => {
     grouped.set(row.upstreamId, tools);
   }
 
-  const lines: string[] = ['', ''];
+  const lines = ['', '# gated aggregate agent tools for context sharing, documentation, and task management #'];
   const columnCount = 3;
 
   for (const upstreamId of [...grouped.keys()].sort()) {

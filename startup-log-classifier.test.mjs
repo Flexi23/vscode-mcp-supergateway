@@ -87,7 +87,7 @@ test('formats grouped upstream tool catalog rows without transport column', () =
     formatToolCatalogTable(rows),
     [
       '',
-      '',
+      '# gated aggregate agent tools for context sharing, documentation, and task management #',
       '',
       'codebase-memory:',
       '  index_repository',
