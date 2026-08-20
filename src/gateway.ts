@@ -3,11 +3,15 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startBackendServer } from './server';
 import { requireEnv, requirePort } from './config/env';
 import {
   classifyStartupLogLine,
   formatConnectedUpstreamSummary,
+  formatToolCatalogTable,
+  matchToolToUpstream,
   splitStartupLogLines,
 } from './startupLogClassifier';
 import {
@@ -16,6 +20,7 @@ import {
   ensureDir,
   normalizeContainerPath,
   resetGatewayPersistentState,
+  type GatewayConfig,
 } from './gatewayConfig';
 import {
   autoIndexCodebaseMemory,
@@ -33,7 +38,69 @@ const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
 const cbmHostWorkspaceDir = requireEnv('CBM_HOST_WORKSPACE_DIR');
 const cbmDefaultPath = normalizeContainerPath('CBM_DEFAULT_PATH', '/workspace');
 
-function main() {
+const sleep = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs));
+
+async function discoverGatewayToolRows(adminPort: number, upstreams: GatewayConfig['upstreams']) {
+  const client = new Client({ name: 'supergateway-log-viewer', version: '1.0.0' });
+
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://localhost:${adminPort}/mcp`)));
+    const page = await client.listTools();
+    const rows = [] as Array<{ upstreamId: string; toolName: string; transport: string }>;
+    const seen = new Set<string>();
+
+    for (const tool of page.tools ?? []) {
+      if (!tool || typeof tool.name !== 'string') {
+        continue;
+      }
+
+      const match = matchToolToUpstream(tool.name, upstreams);
+      if (!match || !match.toolName) {
+        continue;
+      }
+
+      const key = `${match.upstreamId}:${match.toolName}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push(match);
+    }
+
+    return rows.sort((left, right) => {
+      const upstreamCompare = left.upstreamId.localeCompare(right.upstreamId);
+      if (upstreamCompare !== 0) {
+        return upstreamCompare;
+      }
+      return left.toolName.localeCompare(right.toolName);
+    });
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
+async function emitGatewayToolCatalog(adminPort: number, upstreams: GatewayConfig['upstreams']) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    try {
+      const rows = await discoverGatewayToolRows(adminPort, upstreams);
+      if (rows.length > 0) {
+        console.error(formatToolCatalogTable(rows));
+        return;
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (attempt === 24) {
+        console.warn(`[gateway] tool catalog discovery still warming up (${detail})`);
+      }
+    }
+
+    await sleep(250);
+  }
+
+  console.error(formatToolCatalogTable([]));
+}
+
+async function main() {
   ensureDir(dataDir);
   ensureDir(cbmCacheDir);
   resetGatewayPersistentState(dataDir, cbmCacheDir);
@@ -70,40 +137,57 @@ function main() {
   );
 
   const startupBanner = `
-__________________________________________________________________________________
-      __                                  __                                      
-    /    )                              /    )                                    
-----\-----------------__----__---)__---/---------__--_/_----__-----------__-------
-     \     /   /    /   ) /___) /   ) /  --,   /   ) /    /___)| /| /  /   ) /   /
-_(____/___(___(____/___/_(___ _/_____(____/___(___(_(_ __(___ _|/_|/__(___(_(___/_
-                  /                                                            /  
-                 /                                                         (_ /   
-`;
-  const publicEndpointLog  = `          RBAC-MCP: http://localhost:${publicPort}/mcp`;
-  const adminUiEndpointLog = `          Admin UI: http://localhost:${adminUiPort}`;
-  let adminUiEndpointLogged = false;
-  let publicEndpointLogged = false;
+ ▄▄▄▄▄▄▄▄▄   ▄▄▄▄ ▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄   ▄▄▄▄   ▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄ ▄▄▄▄▄
+█▄███████▄█ █████ █████ █████████▄█ █▄█████████ █████████▄█ █▄█████████ █▄███████▄█ ███████████ █▄█████████ █████   █████ █▄███████▄█ █████ █████
+█▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█   █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█
+█▒▒▒█▀█▒▒▒█ █▒▒▒█ █▒▒▒█ █▄▄▄█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▄▄▄█▀█▒▒▒█ █▒▒▒█▄█████ █▒▒▒█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█   █▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█ █▒▒▒█
+█░░░█▄█▀▀▀█ █░░░█ █░░░█ █░░░█▄█░░░█ █░░░█▄█▀▀▀▀ █░░░█▄█░░░█ █░░░█░░░░░█ █░░░█▄█░░░█ █░░░█ ▀▀▀▀▀ █░░░█▄█▀▀▀▀ █░░░█▄▄▄█░░░█ █░░░█▄█░░░█ █░░░█▄█░░░█
+██▀▀▀▀▀░░▄█ █░░░█ █░░░█ █░░░░░░░░░█ █░░░░░█▄▄▄▄ █░░░▀▀▀░░▄█ █░░░█▀█░░░█ █░░░░░░░░░█ █░░░█       █░░░░░█▄▄▄▄ █░░░█░░░█░░░█ █░░░░░░░░░█ █▀▀▀▀▀▀░░░█
+█▒▒▒█▄█▒▒▒█ █▒▒▒█▄█▒▒▒█ █▒▒▒▒▒▒▒▒▀█ █▒▒▒███▒▒▒█ █▒▒▒█ █▒▒▒█ █▒▒▒█▄█▒▒▒█ █▒▒▒▒▒▒▒▒▒█ █▒▒▒█       █▒▒▒███▒▒▒█ █▒▒▒█▒▒▒█▒▒▒█ █▒▒▒▒▒▒▒▒▒█ █▒▒▒█▄█▒▒▒█
+█▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀▀▀▀▀  █▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓█       █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓▓▓▓▓▓▓█
+███████████ ███████████ █████       ███████████ █████ █████ ███████████ █████ █████ █████       ███████████ ██████▀██████ █████ █████ ███████████
+▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀ ▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀`;
+  const publicEndpointLog  = `RBAC-MCP: http://localhost:${publicPort}/mcp`;
+  const adminUiEndpointLog = `Admin UI: http://localhost:${adminUiPort}`;
+  let toolCatalogLogged = false;
 
-  const emitAdminUiEndpointLog = () => {
-    if (adminUiEndpointLogged) {
+  const emitGatewayToolCatalogOnce = async () => {
+    if (toolCatalogLogged) {
       return;
     }
-    adminUiEndpointLogged = true;
-    console.error(adminUiEndpointLog);
-  };
+    toolCatalogLogged = true;
 
-  const emitPublicEndpointLog = () => {
-    if (publicEndpointLogged) {
+    try {
+      const rows = await discoverGatewayToolRows(adminPort, adminConfig.upstreams);
+      console.error(startupBanner);
+      console.error(publicEndpointLog);
+      console.error(adminUiEndpointLog);
+      console.error(formatToolCatalogTable(rows.length > 0 ? rows : []));
       return;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`[gateway] tool catalog discovery still warming up (${detail})`);
     }
-    publicEndpointLogged = true;
+
     console.error(startupBanner);
     console.error(publicEndpointLog);
+    console.error(adminUiEndpointLog);
+    console.error(formatToolCatalogTable([]));
   };
 
   let startupLogBuffer = '';
 
-  const queueStartupLogs = (text: string) => {
+  const queueStartupLogs = (text: string, caller: string = 'gateway', stream: 'stdout' | 'stderr' = 'stderr') => {
+    const streamPrefix = `[${caller}:${stream}] `;
+    const emit = (value: string) => {
+      if (stream === 'stdout') {
+        process.stdout.write(`${streamPrefix}${value}\n`);
+        return;
+      }
+
+      process.stderr.write(`${streamPrefix}${value}\n`);
+    };
+
     const { lines, pending } = splitStartupLogLines(text, startupLogBuffer);
     startupLogBuffer = pending;
 
@@ -111,12 +195,16 @@ _(____/___(___(____/___/_(___ _/_____(____/___(___(_(_ __(___ _|/_|/__(___(_(___
       const event = classifyStartupLogLine(line);
       switch (event.kind) {
         case 'upstream-connected':
-          console.error(formatConnectedUpstreamSummary(event.upstreamId, event.transport));
+          emit(formatConnectedUpstreamSummary(event.upstreamId, event.transport));
+          break;
+        case 'gateway-admin-ui':
+          emit(event.text);
+          void emitGatewayToolCatalogOnce();
           break;
         case 'ignored':
           break;
         case 'plain':
-          process.stderr.write(`${event.text}\n`);
+          emit(event.text);
           break;
       }
     }
@@ -124,14 +212,14 @@ _(____/___(___(____/___/_(___ _/_____(____/___(___(_(_ __(___ _|/_|/__(___(_(___
 
   if (gatewayProcess.stdout) {
     gatewayProcess.stdout.on('data', (chunk: Buffer | string) => {
-      queueStartupLogs(chunk.toString());
+      queueStartupLogs(chunk.toString(), 'gateway', 'stdout');
     });
   }
 
   if (gatewayProcess.stderr) {
     gatewayProcess.stderr.setEncoding('utf8');
     gatewayProcess.stderr.on('data', (chunk: Buffer | string) => {
-      queueStartupLogs(chunk.toString());
+      queueStartupLogs(chunk.toString(), 'gateway', 'stderr');
     });
   }
 
@@ -160,10 +248,8 @@ _(____/___(___(____/___/_(___ _/_____(____/___(___(_(_ __(___ _|/_|/__(___(_(___
   });
   startBackendServer(Number(process.env.BACKEND_PORT || 8081));
 
-  emitPublicEndpointLog();
-  emitAdminUiEndpointLog();
 }
 
 if (require.main === module) {
-  main();
+  void main();
 }

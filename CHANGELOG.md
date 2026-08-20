@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-08-20
+### Added
+- The startup log now waits for the gateway admin UI line before printing the final tool catalog and groups all discovered tools by upstream so the inventory is easier to read at a glance.
+- Added real upstream-to-tool matching that normalizes namespace and separator variants, ensuring the catalog lists the actual exposed tool names instead of wildcard namespace placeholders.
+- Added ffmpeg to the runtime image so the bundled MarkItDown MCP upstream can handle media conversion in a self-contained container setup.
+
+### Changed
+- Reworked the startup log queue to carry caller and stream metadata so each emitted line is identifiable in the console output while keeping classification stable.
+- Removed the transport column from the final tool summary and render the grouped tool list in a compact per-upstream layout after the public/admin URLs.
+- Kept the runtime gateway config and boot flow separated by concern while preserving the embedded reverse-layer approach.
+
 ## [Unreleased]
 ### Added
 - The dashboard's "Codebase Memory" tab now opens a new `/cbm/overview` page instead of embedding the CBM UI directly: it lists the project folders discovered under the configured workspace root, each with an "Index" button (`POST /cbm/index`) to trigger indexing for just that directory, live status polling (`GET /cbm/index-status`), and the actual CBM graph UI embedded below. Indexing logic used by the old startup auto-index and this new per-directory button was consolidated into a single job-tracked `indexRepository()` helper.

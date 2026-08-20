@@ -15,7 +15,7 @@ ENV NODE_ENV=production
 # markitdown-mcp is Python/pip-only (no npm package); bundling it here removes
 # the host-side "pip install markitdown-mcp" dependency entirely.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip \
+    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages markitdown-mcp
 COPY package.json package-lock.json ./
