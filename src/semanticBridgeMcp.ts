@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { SemanticDependencyResolver, TypeScriptDependencyResolver } from './services/semanticDependencyResolver';
+import { SemanticEdgeResolutionStrategyDispatcher, TypeScriptDependencyResolver } from './services/semanticEdgeResolutionStrategyDispatcher';
 import { requireEnv } from './config/env';
 
 const workspaceRoot = '/workspace';
@@ -47,8 +47,8 @@ server.registerTool('csharp_list_workspace_files', {
 }, async (args: Record<string, unknown> = {}, _extra: unknown) => {
   const parsed = listFilesSchema.parse(args ?? {});
   const root = parsed.root || workspaceRoot;
-  const extractor = new SemanticDependencyResolver(root);
-  const files = extractor.collectCSharpFiles(root);
+  const extractor = new SemanticEdgeResolutionStrategyDispatcher(root);
+  const files = extractor.collectSemanticFiles(root);
   const included = parsed.include && parsed.include.length > 0
     ? files.filter((file: { fsPath: string }) => parsed.include!.some((prefix: string) => file.fsPath.includes(prefix)))
     : files;
@@ -67,7 +67,7 @@ server.registerTool('csharp_extract_dependency_graph', {
 }, async (args: Record<string, unknown> = {}, _extra: unknown) => {
   const parsed = dependencyGraphSchema.parse(args ?? {});
   const root = parsed.root || workspaceRoot;
-  const extractor = new SemanticDependencyResolver(root);
+  const extractor = new SemanticEdgeResolutionStrategyDispatcher(root);
   const allLinks = await extractor.extractEdgesFromFilesystem(root);
   const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
 
@@ -85,7 +85,7 @@ server.registerTool('typescript_list_workspace_files', {
 }, async (args: Record<string, unknown> = {}, _extra: unknown) => {
   const parsed = typescriptListFilesSchema.parse(args ?? {});
   const root = parsed.root || workspaceRoot;
-  const extractor = new TypeScriptDependencyResolver(root);
+  const extractor = new TypeScriptDependencyResolver();
   const files = extractor.collectTypeScriptFiles(root);
   const included = parsed.include && parsed.include.length > 0
     ? files.filter((file: { fsPath: string }) => parsed.include!.some((prefix: string) => file.fsPath.includes(prefix)))
@@ -105,7 +105,7 @@ server.registerTool('typescript_extract_dependency_graph', {
 }, async (args: Record<string, unknown> = {}, _extra: unknown) => {
   const parsed = typescriptDependencyGraphSchema.parse(args ?? {});
   const root = parsed.root || workspaceRoot;
-  const extractor = new TypeScriptDependencyResolver(root);
+  const extractor = new TypeScriptDependencyResolver();
   const allLinks = await extractor.extractTypeScriptEdgesFromFilesystem(root);
   const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
 

@@ -11,7 +11,7 @@ I want to implement a robust solution to extract cross-file dependencies and gen
 
 Please provide a TypeScript implementation for my VS Code extension that:
 1. Takes a list of indexed C# file URIs (`nodes`).
-2. Programmatically queries the C# Language Server using VS Code's built-in commands (e.g., `vscode.executeDocumentSymbolProvider` combined with `vscode.executeReferenceProvider` or `vscode.executeDefinitionProvider`).
+2. Programmatically resolves C# and Razor references via a Roslyn-based dependency resolver running inside the gateway container, without depending on VS Code or a host editor session.
 3. Maps these references/definitions back to other files in the workspace to construct the `edges`.
 4. Outputs the final result as a standard graph links array: `[{ "source": "FileA.cs", "target": "FileB.cs", "weight": 1 }]`.
 

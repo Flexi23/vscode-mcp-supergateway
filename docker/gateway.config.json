@@ -18,6 +18,18 @@
       }
     },
     {
+      "id": "supergateway-rpc",
+      "namespace": "supergatewayrpc",
+      "transport": "stdio",
+      "command": "node",
+      "args": ["/app/dist/supergatewayRpcMcp.js"],
+      "env": {
+        "LMSTUDIO_BASE_URL": "http://host.docker.internal:1234/v1",
+        "SIYUAN_HOST": "siyuan",
+        "SIYUAN_PORT": "6806"
+      }
+    },
+    {
       "id": "siyuan-note",
       "namespace": "siyuannote",
       "transport": "stdio",

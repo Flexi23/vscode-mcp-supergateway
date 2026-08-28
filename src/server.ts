@@ -2,8 +2,8 @@ import express from 'express';
 import { registerLMStudioTools } from './tools/lmstudioLoopback';
 import { siyuanClient } from './services/siyuanClient';
 
-// Exported so gateway.ts can run this in the same process instead of a second container.
-export function startBackendServer(port: number = Number(process.env.PORT || 8081)) {
+// Standalone loopback server kept only for local tooling; no published port is configured here.
+export function startBackendServer(port: number = Number(process.env.PORT || 3000)) {
   const mcpServer = {
     registerTool: (tool: any) => {
       console.log(`Registering tool: ${tool.name}`);

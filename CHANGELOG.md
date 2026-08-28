@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.3.0] - 2026-08-20
 ### Added
 - The dashboard's "Codebase Memory" tab now opens a new `/cbm/overview` page instead of embedding the CBM UI directly: it lists the project folders discovered under the configured workspace root, each with an "Index" button (`POST /cbm/index`) to trigger indexing for just that directory, live status polling (`GET /cbm/index-status`), and the actual CBM graph UI embedded below. Indexing logic used by the old startup auto-index and this new per-directory button was consolidated into a single job-tracked `indexRepository()` helper.
-- Added a dedicated `semantic-bridge` MCP upstream that exposes both C# and TypeScript workspace and dependency tools over stdio, using the VS Code semantic APIs when available and file-based fallbacks otherwise.
+- Added a dedicated `semantic-bridge` MCP upstream that exposes both C# and TypeScript workspace and dependency tools over stdio, using a Roslyn-based .NET resolver for C# and file-based parsing for the remaining source types.
 - Documented the IDE-native semantic bridge pattern in the architecture diagram and README: semantic providers are wrapped as MCP upstreams and then aggregated by the gateway instead of being reached directly from the container.
 - Added the bridge wiring to `docker/gateway.config.json` and the MCP SDK dependency in `package.json` so the gateway can register the new upstream automatically.
 - The startup log now waits for the gateway admin UI line before printing the final tool catalog, then groups discovered tools by upstream using normalized namespace/separator matching so the output shows the real exposed tool names instead of wildcard placeholders.

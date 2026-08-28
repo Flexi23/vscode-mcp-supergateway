@@ -5,7 +5,6 @@ import fs from 'fs';
 import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { startBackendServer } from './server';
 import { requireEnv, requirePort } from './config/env';
 import {
   classifyStartupLogLine,
@@ -25,15 +24,17 @@ import {
 import {
   autoIndexCodebaseMemory,
   configureCodebaseMemoryUi,
+  startCodebaseMemoryUi,
 } from './codebaseMemory';
-import { startForwardProxy } from './proxy';
+import { startDashboardServer, startForwardProxy } from './proxy';
 
 const dataDir = requireEnv('GATEWAY_DATA_DIR');
 const adminPort = requirePort('MCP_GATEWAY_ADMIN_PORT');
 const adminUiPort = requirePort('ADMIN_UI_PORT');
 const publicPort = requirePort('MCP_GATEWAY_PUBLIC_PORT');
+const mspGatewayPort = adminPort;
+const siyuanPort = requirePort('SIYUAN_PORT');
 const cbmUiPort = requirePort('CBM_UI_PORT');
-const cbmUiBackendPort = requirePort('CBM_UI_BACKEND_PORT');
 const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
 const cbmHostWorkspaceDir = requireEnv('CBM_HOST_WORKSPACE_DIR');
 const cbmDefaultPath = normalizeContainerPath('CBM_DEFAULT_PATH', '/workspace');
@@ -106,7 +107,8 @@ async function main() {
   resetGatewayPersistentState(dataDir, cbmCacheDir);
   cleanupStaleCodebaseMemoryDaemon();
 
-  configureCodebaseMemoryUi(cbmCacheDir, cbmUiBackendPort, cbmDefaultPath);
+  configureCodebaseMemoryUi(cbmCacheDir, cbmUiPort, cbmDefaultPath);
+  startCodebaseMemoryUi(cbmCacheDir, cbmUiPort, cbmDefaultPath);
 
   const adminConfig = buildAdminConfig(cbmCacheDir);
   const adminConfigPath = path.join(dataDir, 'admin-gateway-config.json');
@@ -124,6 +126,8 @@ async function main() {
   const env = { ...process.env, DEV_ALLOW_UNAUTHENTICATED: 'true', CI: 'true' };
   const proxyRuntimeConfig = {
     adminUiPort,
+    mspGatewayPort,
+    siyuanPort,
     cbmUiPort,
     cbmDefaultPath,
     cbmCacheDir,
@@ -136,17 +140,17 @@ async function main() {
     { env, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 
+// generated using https://patorjk.com/software/taag/#p=display&f=Banshee+Brow&t=SuperGateway&x=none&v=4&h=4&w=80&we=false&ft=thedraw
   const startupBanner = `
- ▄▄▄▄▄▄▄▄▄   ▄▄▄▄ ▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄ ▄▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄▄▄▄▄▄  ▄▄▄▄   ▄▄▄▄   ▄▄▄▄▄▄▄▄▄  ▄▄▄▄▄ ▄▄▄▄▄
-█▄███████▄█ █████ █████ █████████▄█ █▄█████████ █████████▄█ █▄█████████ █▄███████▄█ ███████████ █▄█████████ █████   █████ █▄███████▄█ █████ █████
-█▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█   █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█
-█▒▒▒█▀█▒▒▒█ █▒▒▒█ █▒▒▒█ █▄▄▄█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▄▄▄█▀█▒▒▒█ █▒▒▒█▄█████ █▒▒▒█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█   █▒▒▒█ █▒▒▒█▀█▒▒▒█ █▒▒▒█ █▒▒▒█
-█░░░█▄█▀▀▀█ █░░░█ █░░░█ █░░░█▄█░░░█ █░░░█▄█▀▀▀▀ █░░░█▄█░░░█ █░░░█░░░░░█ █░░░█▄█░░░█ █░░░█ ▀▀▀▀▀ █░░░█▄█▀▀▀▀ █░░░█▄▄▄█░░░█ █░░░█▄█░░░█ █░░░█▄█░░░█
-██▀▀▀▀▀░░▄█ █░░░█ █░░░█ █░░░░░░░░░█ █░░░░░█▄▄▄▄ █░░░▀▀▀░░▄█ █░░░█▀█░░░█ █░░░░░░░░░█ █░░░█       █░░░░░█▄▄▄▄ █░░░█░░░█░░░█ █░░░░░░░░░█ █▀▀▀▀▀▀░░░█
-█▒▒▒█▄█▒▒▒█ █▒▒▒█▄█▒▒▒█ █▒▒▒▒▒▒▒▒▀█ █▒▒▒███▒▒▒█ █▒▒▒█ █▒▒▒█ █▒▒▒█▄█▒▒▒█ █▒▒▒▒▒▒▒▒▒█ █▒▒▒█       █▒▒▒███▒▒▒█ █▒▒▒█▒▒▒█▒▒▒█ █▒▒▒▒▒▒▒▒▒█ █▒▒▒█▄█▒▒▒█
-█▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀▀▀▀▀  █▓▓▓▓▓▓▓▓▓█ █▓▓▓█ █▓▓▓█ █▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓█       █▓▓▓▓▓▓▓▓▓█ █▓▓▓▓▓▓▓▓▓▓▓█ █▓▓▓█▀█▓▓▓█ █▓▓▓▓▓▓▓▓▓█
-███████████ ███████████ █████       ███████████ █████ █████ ███████████ █████ █████ █████       ███████████ ██████▀██████ █████ █████ ███████████
-▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀       ▀▀▀▀▀▀▀▀▀▀▀ ▀▀▀▀▀▀ ▀▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀ ▀▀▀▀▀▀▀▀▀▀▀`;
+  ▄▄▒▓█▓▒▒▒▒▒▓█▓ ▒███▒     ▓▒▒░░░ ▓▒░░▒▓█▓▒░░░░      ▄▄▒▓█▓▒▒▒▒▒▓█▓ ▓▒░░▒▓█▓▒░░░░      ▄▄▒▓█▓▒▒▒▒▒▓█▓   ▄▄▒▓█▓▒▒▒▄▄    ▓█▓▒▒▓▓▒▒▒█▓▒▒   ▄▄▒▓█▓▒▒▒▒▒▓█▓ ▒███▒       ▓▒▒░░░   ▄▄▒▓█▓▒▒▒▄▄    █▓▒▓▓     █░░░░▓
+▄▓▓░▒▓██▓▒░▒▒▒▒▒ ▓▓▓▓▒     ░▓▒▒░░ █▓▓░▒▓██▓▒░▒▒▒░  ▄▓▓░▒▓██▓▒░▒▒▒▒▒ ███░▒▓██▓▒░▒▒▒░  ▄██░▒▓██▓▒░▒▒▒▒▒  █░░▒▓█░░▒▓▓▓▓▄  ▓██▓▓██▓▒░██▓▒ ▄▓▓░▒▓██▓▒░▒▒▒▒▒ ▓▓▓▓▒       ░▓▒▒░░  █░░▒▓█░░▒▓▓▓▓▄  ▓▓▓▓▒     ▓▒▒▒▒▒
+█▒▒▒░▀    ░▓▓▓▓░ █▒▒▒░     ░▓▓▒▒░ █▒▒▒░     ░▓▓▓▓░ █▒▒▒░▀    ░▓▓▓▓░ █▓▓▓░     ░▓▓▓▓░ █▓▓▓░▀    ░▓▓▓▓░ █▒▒░░▀   ▀░▒▒▒▒▌     █▒▒▒░      █▒▒▒░▀    ░▓▓▓▓░ █▒▒▒░       ░▓▓▒▒░ █▒▒░░▀   ▀░▒▒▒▒▌ ▒▒▒▒░     ░▓▓▓▓░
+▓░░░░▒▄▄▄▄▄▄     ▓░░░░     ▒██▓▒▒ ▓░░░░    ▐▓███▓▀ ▓░░░░▄▄▄  ▒████░ ▓▒▒▒░    ▐▓███▓▀ ▓▒▒▒░ ▄▄▄▄▄▄▄▄▄▄ ▓▓▓▒░     ▒░░░░░     ▓░░░░      ▓░░░░▄▄▄  ▒████░ ▓░░░░  ░░░  ▒██▓▒▒ ▓▓▓▒░     ▒░░░░░ ▓░░░░▒▄▄▄▄▒████░
+▀░░░▒▓▓▓▓▒▓███▄  ▒░░░▒     ▓██▓▒▒ ▒▒▒▒▒▄▄▄████▓▀   ▒░░░▒░▒▓  ▀▀▀▀▀▀ ▒░░░▒▄▄▄▄███▓▀   ▒░░░▒ █░░▒▒▓▓███ ▒██▓▒▄▄▄▄▄▓░░░░▒     ▒░░░▒      ▒░░░▒░▒▓  ▀▀▀▀▀▀ ▒░░░▒  ▒▒▒  ▓██▓▒▒ ▒██▓▒▄▄▄▄▄▓░░░░▒ ▀░░░▒▓▓▓▓▒▓████▒
+▄▄▄▄▄    ▀▓▓▓▓█▌ ░▒▒▒▓     █▓▓█▓▒ ░░░░▒▒▓▓██▀▀     ░▒▒▒▓     ▄▄▄▄▄▄ ░░░░▒▒▓▓███▒▓▓▄  ░░░░▓     █▓▓▓▓█ ░▓▓█▓▓▓▓▒▒▒▒▒▒▒▓     ░▒▒▒▓      ░▒▒▒▓     ▄▄▄▄▄▄ ░▒▒▒▓  ▓▓▓  █▓▓█▓▒ ░▓▓█▓▓▓▓▒▒▒▒▒▒▒▓           ▓▓▓▓▓▓
+░▒▒▒░     █▒▒▒▒█ ░▓▓▓█▌   ▐█▓▓▓▒░ ░▒▒▒█            ░▓▓▓█     █▒▒▒▒█ ░▒▒▒█    ▀█▒▓▓▓█ ░▒▒▒░     █▒▒▒▒█ ░▒▒▓█     █▓▓▓▓█     ░▓▓▓█      ░▓▓▓█     █▒▒▒▒█ ░▓▓▓█▌ ███ ▐█▓▓▓▒░ ░▒▒▓█     █▓▓▓▓█ ░▒▒▒░     █▒▒▒▒█
+▀▓▓▓▓█▄▄▄█▓▒▒░░░ ▀▓▒▒▒█▄▄▄█▓█▓▒░  ▒▓▓▓▓            ▀▓▒▒▒█▄▄▄▄▓░░░░▓ ▒▓▓▓▓     ▓░░▒▒▓ ▀▓▓▓▓█▄▄▄▄▓░░░░▓ ▒░░░▓     ▓▒▒▒▒▓     █▒▒▒█      ▀▓▒▒▒█▄▄▄▄▓░░░░▓ ▀▓▒▒▒█▄███▄█▓█▓▒░  ▒░░░▓     ▓▒▒▒▒▓ ▀▓▓▓▓█▄▄▄█▓▒▒░░░
+  ▀▀▓▓▓▒▒▒▒▒░░     ▀▀▓▒▓█▓▓██▒░   ▓▓▓▓▓              ▀▀▓▓▓▒▒▒░░░░░▒ ▓▓▓▓▓     ▒░▒▒▒▓   ▀▀▓▓▓▒▒▒░░░░░▒ ▓░░░▒     ▒░░░░▒     ▓░░░▓        ▀▀▓▓▓▒▒▒░░░░░▒   ▀▀▓▒▓▓▓█▓▓██▒░   ▓░░░▒     ▒░░░░▒   ▀▀▓▓▓▒▒▒▒▒░░  `;
   const publicEndpointLog  = `RBAC-MCP: http://localhost:${publicPort}/mcp`;
   const adminUiEndpointLog = `Admin UI: http://localhost:${adminUiPort}`;
   let toolCatalogLogged = false;
@@ -232,22 +236,14 @@ async function main() {
     process.exit(code ?? 1);
   });
 
-  startForwardProxy(cbmUiPort, cbmUiBackendPort, {
-    ...proxyRuntimeConfig,
-    rewriteOriginToLoopback: true,
-    dashboardEnabled: false,
-    stripFrameHeaders: true,
-  });
-  startForwardProxy(adminUiPort, adminPort, {
-    ...proxyRuntimeConfig,
-    dashboardEnabled: true,
-  });
   startForwardProxy(publicPort, adminPort, {
     ...proxyRuntimeConfig,
     dashboardEnabled: false,
   });
-  startBackendServer(Number(process.env.BACKEND_PORT || 8081));
-
+  startDashboardServer(adminUiPort, {
+    ...proxyRuntimeConfig,
+    dashboardEnabled: true,
+  });
 }
 
 if (require.main === module) {
