@@ -4,6 +4,7 @@ import type { GraphLink, GraphUri } from './semanticEdgeResolutionStrategyDispat
 export enum ResolverStrategyType {
   DotNet = 'dotnet',
   TypeScript = 'typescript',
+  Python = 'python',
   Generic = 'generic',
 }
 

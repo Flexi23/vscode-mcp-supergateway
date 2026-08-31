@@ -2,6 +2,7 @@
 import * as path from 'path';
 import { DotNetDependencyResolver } from './dotnetDependencyResolver';
 import { GenericSemanticFileDependencyResolver } from './genericSemanticFileDependencyResolver';
+import { PythonCallChainResolver } from './pythonCallChainResolver';
 import { ResolverStrategy, ResolverStrategyType } from './resolverStrategy';
 import { TypeScriptDependencyResolver } from './typescriptDependencyResolver';
 
@@ -16,6 +17,7 @@ export type GraphUri = { fsPath: string; toString(): string };
 const strategyOrder: ResolverStrategyType[] = [
   ResolverStrategyType.DotNet,
   ResolverStrategyType.TypeScript,
+  ResolverStrategyType.Python,
   ResolverStrategyType.Generic,
 ];
 
@@ -28,6 +30,8 @@ export class SemanticEdgeResolutionStrategyDispatcher {
         return new DotNetDependencyResolver();
       case ResolverStrategyType.TypeScript:
         return new TypeScriptDependencyResolver();
+      case ResolverStrategyType.Python:
+        return new PythonCallChainResolver();
       case ResolverStrategyType.Generic:
       default:
         return new GenericSemanticFileDependencyResolver();
@@ -195,4 +199,5 @@ export class SemanticEdgeResolutionStrategyDispatcher {
 }
 
 export { TypeScriptDependencyResolver };
+export { PythonCallChainResolver };
 

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-08-31
+### Added
+- Added a Python call-chain resolver (`src/services/pythonCallChainResolver.ts`, `ResolverStrategyType.Python`) to the semantic edge resolution strategy dispatcher, registered alongside the existing .NET/TypeScript strategies. It spawns the container's `python3` running an embedded script built on the stdlib `ast` module (the real Python parser) to resolve intra-project imports and then walks each file's call expressions, resolving callees against per-file import bindings and a project-wide (unambiguous) symbol table, emitting file-level call-chain edges in the same `{source, target, weight}` shape as the other resolvers.
+- Exposed the new resolver via two `semantic-bridge` MCP tools in `src/semanticBridgeMcp.ts`: `python_list_workspace_files` and `python_extract_call_chain_graph`, mirroring the existing `csharp_*`/`typescript_*` tool pattern.
+
 ## [2.4.0] - 2026-08-31
 ### Added
 - `docker-compose.yml` now publishes `CBM_UI_BACKEND_PORT` alongside the other gateway ports.

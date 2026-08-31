@@ -277,9 +277,6 @@ export function buildCbmOverviewHtml({
   <body>
     <div class="panel">
       <h2>Codebase Memory Projects</h2>
-      <div class="graph-launcher">
-        <a class="btn secondary" href="/cbm/graph?tab=stats" target="_blank" rel="noopener noreferrer">Open graph in new tab</a>
-      </div>
       <section class="panel">
       <table>
         <colgroup><col class="col-name"><col class="col-actions"></colgroup>
