@@ -35,7 +35,7 @@ graph LR
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
             SemanticBridge["VS Code API bridge MCP<br/>code dependency resolver<br/>for C# / JS / MD / ..." ]
             SupergatewayRpc["supergateway-rpc<br/>local tool endpoint<br/>(LM Studio + SiYuan)" ]
-            MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
+            MCP@{ shape: processes, label: "Access Controlled Tools &amp;<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
             GitLab["GitLab MCP"]
             SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
@@ -49,7 +49,7 @@ graph LR
     SupergatewayRpc -. exposes local tools .-> Proxy
     SupergatewayRpc --> |LM Studio / tool calls| LMStudioServer
     SupergatewayRpc <-- |updates task docs| SiYuanNote
-    Supergateway --> |provider|MCP
+    Supergateway --> |provider| MCP
 
     MCP --> Copilot
     MCP --> LMStudioServer
