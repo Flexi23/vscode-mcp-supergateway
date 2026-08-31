@@ -30,11 +30,11 @@ graph LR
         end
 
         subgraph Docker["🐳 Docker Compose"]
-            Supergateway["Supergateway MCP Server"]
+            Supergateway["SuperGateway MCP Server"]
 
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
-            SemanticBridge["VS Code API bridge MCP<br/>code dependency resolver<br/>for C# / JS / MD / ..." ]
-            SupergatewayRpc["supergateway-rpc<br/>local tool endpoint<br/>(LM Studio + SiYuan)" ]
+            SemanticBridge["Semantic Bridge MCP<br/>call chain resolver for<br/>C# / TS / JS / Py / MD / ..." ]
+            SupergatewayRpc["Supergateway RPC<br/>local tool endpoint<br/>(LM Studio + SiYuan)" ]
             MCP@{ shape: processes, label: "Access Controlled Tools &amp;<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
             GitLab["GitLab MCP"]
@@ -48,8 +48,8 @@ graph LR
     SemanticBridge -. provide semantic edges .-> CodebaseMemory
     SupergatewayRpc -. exposes local tools .-> Proxy
     SupergatewayRpc --> |LM Studio / tool calls| LMStudioServer
-    SupergatewayRpc <-- |updates task docs| SiYuanNote
-    Supergateway --> |provider| MCP
+    SiYuanNote --> |updates task docs| SupergatewayRpc
+    Supergateway -->|provider| MCP
 
     MCP --> Copilot
     MCP --> LMStudioServer
