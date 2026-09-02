@@ -8,6 +8,7 @@ export interface GraphLink {
   source: string;
   target: string;
   weight: number;
+  edgeType: string;
 }
 
 const IGNORED_DIR_NAMES = new Set(['.git', 'node_modules', '__pycache__', 'venv', '.venv', 'env', 'dist', 'build', '.mypy_cache', '.pytest_cache']);
@@ -145,10 +146,11 @@ def main():
             if source_rel == target_rel:
                 continue
 
-            key = (source_rel, target_rel)
+            edge_type = 'call-chain' if root_name and root_name in bindings else 'import-bound-call'
+            key = (source_rel, target_rel, edge_type)
             link_weights[key] = link_weights.get(key, 0) + 1
 
-    links = [{'source': s, 'target': t, 'weight': w} for (s, t), w in sorted(link_weights.items())]
+    links = [{'source': s, 'target': t, 'weight': w, 'edgeType': edge_type} for (s, t, edge_type), w in sorted(link_weights.items())]
     print(json.dumps({'links': links}))
 
 
@@ -235,9 +237,9 @@ export class PythonCallChainResolver extends ResolverStrategy {
         return [];
       }
 
-      const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number }> };
+      const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number; edgeType?: string }> };
       const links = Array.isArray(payload.links)
-        ? payload.links.map((entry) => ({ source: entry.source, target: entry.target, weight: Math.max(1, entry.weight ?? 1) }))
+        ? payload.links.map((entry) => ({ source: entry.source, target: entry.target, weight: Math.max(1, entry.weight ?? 1), edgeType: entry.edgeType || 'call-chain' }))
         : [];
 
       onProgress?.(`[PythonCallChainResolver] call chain graph ready: ${links.length} edge(s)`, 100, pyFiles.length, Math.max(pyFiles.length, 1));

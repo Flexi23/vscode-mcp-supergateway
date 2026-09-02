@@ -214,7 +214,7 @@ export function buildCbmOverviewHtml({
         const encodedPath = encodeURIComponent(projectPath);
         const rowState = resolveInitialProjectRowState(project);
         const actionMarkup = rowState === 'active'
-          ? `<a class="btn secondary graph-link" href="/cbm/graph?tab=graph&project=${encodeURIComponent(projectName)}" target="_blank" rel="noopener noreferrer">Open 3D graph</a><button type="button" class="btn secondary semantic-button" data-path="${encodedPath}">Transfer semantic edges</button>`
+          ? `<a class="text-action graph-link" href="/cbm/graph?tab=graph&project=${encodeURIComponent(projectName)}" target="_blank" rel="noopener noreferrer">Open 3D graph</a><a class="text-action semantic-button" href="#" data-path="${encodedPath}">Transfer semantic edges</a>`
           : rowState === 'indexing'
             ? '<span class="muted-action">indexing…</span>'
             : rowState === 'ingesting semantics'
@@ -222,7 +222,7 @@ export function buildCbmOverviewHtml({
               : rowState === 'checking'
                 ? '<span class="muted-action">checking…</span>'
                 : rowState === 'idle' || rowState === 'unchecked'
-                  ? `<button type="button" class="btn index-button" data-path="${encodedPath}">Add to Index</button>`
+                  ? `<a class="text-action index-button" href="#" data-path="${encodedPath}">Add to Index</a>`
                   : '<span class="muted-action">—</span>';
         return `<tr data-path="${encodedPath}" data-indexed="${String(Boolean(project.indexed))}" data-state="${rowState}">` +
           `<td class="name">${projectName}</td>` +
@@ -267,9 +267,18 @@ export function buildCbmOverviewHtml({
       tr.indexing-row { background: rgba(224, 162, 60, 0.06); }
       tr.ingesting-row { background: rgba(77, 163, 255, 0.06); }
       .actions-inner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      .btn { background: var(--accent); color: #06121f; border: none; border-radius: var(--radius); padding: 7px 14px; font-weight: 600; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-block; }
-      .btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
-      .btn:disabled { opacity: .5; cursor: default; }
+      .text-action {
+        color: var(--text);
+        text-decoration: underline;
+        text-underline-offset: 0.18em;
+        text-decoration-thickness: 1px;
+        font-size: 12px;
+        line-height: 1.4;
+        cursor: pointer;
+        opacity: 0.9;
+      }
+      .text-action:hover { opacity: 1; }
+      .text-action:visited { color: var(--text); }
       .muted-action { color: var(--muted); }
       .graph-launcher { margin: 0 0 16px; display: flex; justify-content: flex-start; }
     </style>
@@ -327,7 +336,7 @@ export function buildCbmOverviewHtml({
 
       function renderActionsCell(actionsEl, projectName, projectPath, state, progress) {
         const encodedPath = encodeURIComponent(projectPath);
-        const graphLink = '<a class="btn secondary graph-link" href="/cbm/graph?tab=graph&project=' + encodeURIComponent(projectName) + '" target="_blank" rel="noopener noreferrer">Open 3D graph</a>';
+        const graphLink = '<a class="text-action graph-link" href="/cbm/graph?tab=graph&project=' + encodeURIComponent(projectName) + '" target="_blank" rel="noopener noreferrer">Open 3D graph</a>';
         const effectiveProgress = typeof progress === 'number' ? Math.min(100, Math.max(0, Math.round(progress))) : null;
         const progressSuffix = effectiveProgress === null ? '' : ' ' + effectiveProgress + '%';
 
@@ -336,7 +345,7 @@ export function buildCbmOverviewHtml({
         };
 
         if (state === 'active') {
-          setInner(graphLink + '<button type="button" class="btn secondary semantic-button" data-path="' + encodedPath + '">Transfer semantic edges</button>');
+          setInner(graphLink + '<a class="text-action semantic-button" href="#" data-path="' + encodedPath + '">Transfer semantic edges</a>');
           return;
         }
 
@@ -356,7 +365,7 @@ export function buildCbmOverviewHtml({
         }
 
         if (state === 'unchecked' || state === 'idle') {
-          setInner('<button type="button" class="btn index-button" data-path="' + encodedPath + '">Add to Index</button>');
+          setInner('<a class="text-action index-button" href="#" data-path="' + encodedPath + '">Add to Index</a>');
           return;
         }
 
@@ -448,17 +457,18 @@ export function buildCbmOverviewHtml({
       document.addEventListener('click', async (event) => {
         const button = event.target.closest('.index-button');
         if (button) {
+          event.preventDefault();
           const row = button.closest('tr');
           if (row) {
             const projectPath = decodeURIComponent(row.dataset.path || '');
             const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
             renderActionsCell(row.querySelector('.actions'), projectName, projectPath, 'indexing', 0);
           }
-          button.disabled = true;
+          button.setAttribute('aria-disabled', 'true');
           try {
             await fetch('/cbm/index?path=' + encodeURIComponent(decodeURIComponent(button.dataset.path || '')), { method: 'POST' });
           } finally {
-            button.disabled = false;
+            button.removeAttribute('aria-disabled');
             refreshStatus();
           }
           return;
@@ -466,11 +476,12 @@ export function buildCbmOverviewHtml({
 
         const semanticButton = event.target.closest('.semantic-button');
         if (semanticButton) {
-          semanticButton.disabled = true;
+          event.preventDefault();
+          semanticButton.setAttribute('aria-disabled', 'true');
           try {
             await fetch('/cbm/enrich?path=' + encodeURIComponent(decodeURIComponent(semanticButton.dataset.path || '')), { method: 'POST' });
           } finally {
-            semanticButton.disabled = false;
+            semanticButton.removeAttribute('aria-disabled');
             refreshStatus();
           }
         }

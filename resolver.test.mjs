@@ -17,7 +17,7 @@ test('dashboard exposes route-based iframe tabs and the MSP stack UI', () => {
     activeTab: 'msp',
     adminUiPort: 3100,
     mspGatewayPort: 3110,
-    cbmUiPort: 9749,
+    cbmUiPort: 3100,
     siyuanPort: 6806,
   });
 
@@ -29,52 +29,109 @@ test('dashboard exposes route-based iframe tabs and the MSP stack UI', () => {
   assert.doesNotMatch(html, /http:\/\/127\.0\.0\.1:3110\/admin/);
 });
 
-test('status enum distinguishes unchecked, idle, checking and active, and hides actions for unchecked rows', () => {
+test('cbm action cells use compact text links instead of button styling', () => {
   const html = buildCbmOverviewHtml({
-    cbmUiPort: 9749,
+    cbmUiPort: 3100,
     initialProjects: [
-      { name: 'vre', root_path: '/workspace/vre', status: 'unchecked', indexed: false },
-      { name: 'limati-blazor-ui-kit', root_path: '/workspace/limati-blazor-ui-kit', status: 'idle', indexed: false },
-      { name: 'vrm', root_path: '/workspace/vrm', status: 'success', indexed: true },
+      { name: 'alpha-project', root_path: '/workspace/alpha-project', status: 'unchecked', indexed: false },
+      { name: 'beta-project', root_path: '/workspace/beta-project', status: 'active', indexed: true },
     ],
   });
 
-  assert.match(html, /\.status-pill\.active/);
-  assert.match(html, /\.status-pill\.ingesting-semantics/);
+  assert.match(html, /text-decoration:\s*underline/i);
+  assert.match(html, /<a[^>]*class="[^"]*text-action[^"]*"/i);
+  assert.doesNotMatch(html, /class="btn|<button\s/i);
+});
+
+test('resolver metadata exposes a single canonical strategy list and supported file types', async () => {
+  const { listResolverTypes, getSupportedFileTypesForResolver } = await import('./dist/services/resolverStrategy.js');
+
+  assert.deepEqual(listResolverTypes(), ['dotnet', 'typescript', 'python', 'generic']);
+  assert.deepEqual(getSupportedFileTypesForResolver('dotnet'), ['.cs', '.razor']);
+  assert.ok(getSupportedFileTypesForResolver('typescript').includes('.ts'));
+  assert.ok(getSupportedFileTypesForResolver('python').includes('.py'));
+});
+
+test('resolver metadata exposes edge types per resolver strategy', async () => {
+  const { getEdgeTypesForResolver } = await import('./dist/services/resolverStrategy.js');
+
+  assert.deepEqual(getEdgeTypesForResolver('dotnet'), ['file-reference']);
+  assert.deepEqual(getEdgeTypesForResolver('typescript'), ['file-reference']);
+  assert.deepEqual(getEdgeTypesForResolver('python'), ['call-chain', 'import-bound-call']);
+  assert.deepEqual(getEdgeTypesForResolver('generic'), ['file-reference']);
+});
+
+test('dotnet resolver degrades gracefully when Roslyn execution fails', async () => {
+  const { DotNetDependencyResolver } = await import('./dist/services/dotnetDependencyResolver.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-roslyn-failure-'));
+  const sourceFile = path.join(root, 'Demo.cs');
+  fs.writeFileSync(sourceFile, 'namespace Demo { public class Demo {} }\n');
+
+  const previousPath = process.env.PATH;
+  const previousWarn = console.warn;
+  let captured = '';
+  console.warn = (...args) => {
+    captured += args.join(' ');
+  };
+  process.env.PATH = '';
+
+  try {
+    const resolver = new DotNetDependencyResolver();
+    const links = await resolver.extractEdges(root);
+    assert.deepEqual(links, []);
+    assert.match(captured, /ENOENT|not found|spawn|Roslyn dependency resolver failed|dotnet/i);
+  } finally {
+    process.env.PATH = previousPath;
+    console.warn = previousWarn;
+  }
+});
+
+test('status logic keeps compact text-action actions for idle and active rows', () => {
+  const html = buildCbmOverviewHtml({
+    cbmUiPort: 3100,
+    initialProjects: [
+      { name: 'alpha-project', root_path: '/workspace/alpha-project', status: 'unchecked', indexed: false },
+      { name: 'beta-project', root_path: '/workspace/beta-project', status: 'idle', indexed: false },
+      { name: 'gamma-project', root_path: '/workspace/gamma-project', status: 'success', indexed: true },
+    ],
+  });
+
   assert.match(html, /state === 'unchecked'/);
   assert.match(html, /state === 'idle'/);
   assert.match(html, /state === 'checking'/);
   assert.match(html, /state === 'active'/);
   assert.match(html, /if \(state === 'active'\)/);
-  assert.match(html, /if \(state === 'idle'\)/);
-  assert.match(html, /if \(state === 'unchecked'\)/);
-  assert.match(html, /actionsEl\.innerHTML = '';/);
+  assert.match(html, /if \(state === 'unchecked' \|\| state === 'idle'\)/);
+  assert.match(html, /text-action.*Add to Index/i);
+  assert.match(html, /text-action.*Open 3D graph/i);
+  assert.match(html, /text-action.*Transfer semantic edges/i);
 });
 
-test('cbm overview renders the full workspace directory list immediately and starts every row unchecked', () => {
+test('cbm overview renders the full workspace directory list immediately and keeps compact text actions', () => {
   const html = buildCbmOverviewHtml({
-    cbmUiPort: 9749,
+    cbmUiPort: 3100,
     initialProjects: [
-      { name: 'vre', root_path: '/workspace/vre', status: 'unchecked', indexed: false },
-      { name: 'limati-blazor-ui-kit', root_path: '/workspace/limati-blazor-ui-kit', status: 'unchecked', indexed: false },
-      { name: 'vrm', root_path: '/workspace/vrm', status: 'unchecked', indexed: false },
+      { name: 'alpha-project', root_path: '/workspace/alpha-project', status: 'unchecked', indexed: false },
+      { name: 'beta-project', root_path: '/workspace/beta-project', status: 'unchecked', indexed: false },
+      { name: 'gamma-project', root_path: '/workspace/gamma-project', status: 'unchecked', indexed: false },
     ],
   });
 
-  assert.match(html, /vre/);
-  assert.match(html, /limati-blazor-ui-kit/);
-  assert.match(html, /vrm/);
+  assert.match(html, /alpha-project/);
+  assert.match(html, /beta-project/);
+  assert.match(html, /gamma-project/);
   assert.match(html, /data-state="unchecked"/);
-  assert.match(html, /if \(state === 'unchecked'\) \{\s*actionsEl\.innerHTML = '';/s);
-  assert.match(html, /if \(state === 'idle'\) \{/);
+  assert.match(html, /if \(state === 'unchecked' \|\| state === 'idle'\)/);
+  assert.match(html, /text-action.*Add to Index/i);
   assert.doesNotMatch(html, /Loading projects/i);
+  assert.doesNotMatch(html, /<button\s/i);
   assert.match(html, /<tbody id="project-table-body">/);
 });
 
 test('workspace root detection falls back to the container path when a Windows host path is passed', async () => {
   const { resolveRuntimeWorkspaceRoot } = await import('./dist/codebaseMemory.js');
   const fallbackRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cbm-runtime-root-'));
-  const resolved = resolveRuntimeWorkspaceRoot('C:\\gitlab.uni-rostock.de\\limati-inf', fallbackRoot);
+  const resolved = resolveRuntimeWorkspaceRoot('C:\\workspace\\example-root', fallbackRoot);
   assert.equal(resolved, fallbackRoot);
 });
 
@@ -203,15 +260,15 @@ test('workspace host paths and /workspace paths merge to the same project rows a
   const { mergeWorkspaceProjectRows } = await import('./dist/codebaseMemory.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workspace-host-merge-'));
   const cacheDir = path.join(root, 'cache');
-  fs.mkdirSync(path.join(root, 'vrm'), { recursive: true });
-  fs.mkdirSync(path.join(root, 'limati-blazor-ui-kit'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'alpha-app'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'beta-app'), { recursive: true });
   fs.mkdirSync(cacheDir, { recursive: true });
 
   const previousFixture = process.env.CBM_LIST_PROJECTS_FIXTURE;
   process.env.CBM_LIST_PROJECTS_FIXTURE = JSON.stringify({
     projects: [
-      { name: 'vrm', project: 'vrm', path: '/workspace/vrm', root_path: '/workspace/vrm', status: 'success' },
-      { name: 'limati-blazor-ui-kit', project: 'limati-blazor-ui-kit', path: '/workspace/limati-blazor-ui-kit', root_path: '/workspace/limati-blazor-ui-kit', status: 'success' },
+      { name: 'alpha-app', project: 'alpha-app', path: '/workspace/alpha-app', root_path: '/workspace/alpha-app', status: 'success' },
+      { name: 'beta-app', project: 'beta-app', path: '/workspace/beta-app', root_path: '/workspace/beta-app', status: 'success' },
     ],
   });
 
@@ -219,12 +276,12 @@ test('workspace host paths and /workspace paths merge to the same project rows a
     const rows = mergeWorkspaceProjectRows(root, cacheDir);
     const rowMap = new Map(rows.map((row) => [String(row.root_path ?? row.path ?? row.project), row]));
 
-    assert.ok(rowMap.has(path.join(root, 'vrm')));
-    assert.ok(rowMap.has(path.join(root, 'limati-blazor-ui-kit')));
-    assert.equal(rowMap.get(path.join(root, 'vrm'))?.indexed, true);
-    assert.equal(rowMap.get(path.join(root, 'limati-blazor-ui-kit'))?.indexed, true);
-    assert.equal(rowMap.get(path.join(root, 'vrm'))?.status, 'success');
-    assert.equal(rowMap.get(path.join(root, 'limati-blazor-ui-kit'))?.status, 'success');
+    assert.ok(rowMap.has(path.join(root, 'alpha-app')));
+    assert.ok(rowMap.has(path.join(root, 'beta-app')));
+    assert.equal(rowMap.get(path.join(root, 'alpha-app'))?.indexed, true);
+    assert.equal(rowMap.get(path.join(root, 'beta-app'))?.indexed, true);
+    assert.equal(rowMap.get(path.join(root, 'alpha-app'))?.status, 'success');
+    assert.equal(rowMap.get(path.join(root, 'beta-app'))?.status, 'success');
   } finally {
     if (previousFixture === undefined) delete process.env.CBM_LIST_PROJECTS_FIXTURE;
     else process.env.CBM_LIST_PROJECTS_FIXTURE = previousFixture;
@@ -327,9 +384,11 @@ test('DotNetDependencyResolver resolves C# references via Roslyn', async () => {
     source: link.source.replace(/\\/g, '/'),
     target: link.target.replace(/\\/g, '/'),
     weight: link.weight,
+    edgeType: link.edgeType || 'file-reference',
   }));
 
   assert.ok(normalizedLinks.some((link) => link.source.endsWith('src/Alpha.cs') && link.target.endsWith('src/Beta.cs')));
+  assert.ok(normalizedLinks.every((link) => link.edgeType === 'file-reference'));
 });
 
 test('TypeScriptDependencyResolver resolves import graph for TS files only', async () => {
@@ -347,11 +406,13 @@ test('TypeScriptDependencyResolver resolves import graph for TS files only', asy
     source: link.source.replace(/\\/g, '/'),
     target: link.target.replace(/\\/g, '/'),
     weight: link.weight,
+    edgeType: link.edgeType || 'file-reference',
   }));
 
   assert.ok(normalizedFiles.some((file) => file.fsPath.endsWith('src/index.ts')));
   assert.ok(normalizedLinks.some((link) => link.source.endsWith('src/index.ts') && link.target.endsWith('src/utils.ts')));
   assert.ok(normalizedLinks.some((link) => link.source.endsWith('src/ui/button.ts') && link.target.endsWith('src/utils.ts')));
+  assert.ok(normalizedLinks.every((link) => link.edgeType === 'file-reference'));
 });
 
 test('SemanticEdgeResolutionStrategyDispatcher accepts TypeScript-only repositories as semantic sources', async () => {

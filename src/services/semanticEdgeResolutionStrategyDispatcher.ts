@@ -10,6 +10,7 @@ export interface GraphLink {
   source: string;
   target: string;
   weight: number;
+  edgeType: string;
 }
 
 export type GraphUri = { fsPath: string; toString(): string };
@@ -161,10 +162,10 @@ export class SemanticEdgeResolutionStrategyDispatcher {
     const unique: GraphLink[] = [];
 
     for (const link of links) {
-      const key = `${link.source}\u0000${link.target}`;
+      const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
       if (!seen.has(key)) {
         seen.add(key);
-        unique.push({ ...link, weight: Math.max(1, link.weight || 1) });
+        unique.push({ ...link, weight: Math.max(1, link.weight || 1), edgeType: link.edgeType || 'file-reference' });
       }
     }
 
@@ -189,9 +190,9 @@ export class SemanticEdgeResolutionStrategyDispatcher {
 
   private mergeLinks(target: Map<string, GraphLink>, sourceLinks: readonly GraphLink[]): void {
     for (const link of sourceLinks) {
-      const key = `${link.source}\u0000${link.target}`;
+      const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
       if (!target.has(key)) {
-        target.set(key, link);
+        target.set(key, { ...link, edgeType: link.edgeType || 'file-reference' });
       }
     }
   }

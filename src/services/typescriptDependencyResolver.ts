@@ -134,9 +134,9 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
             continue;
           }
 
-          const key = `${source}\u0000${target}`;
+          const key = `${source}\u0000${target}\u0000file-reference`;
           if (!links.has(key)) {
-            links.set(key, { source, target, weight: 1 });
+            links.set(key, { source, target, weight: 1, edgeType: 'file-reference' });
           }
         }
       }
@@ -252,10 +252,10 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
     const unique: GraphLink[] = [];
 
     for (const link of links) {
-      const key = `${link.source}\u0000${link.target}`;
+      const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
       if (!seen.has(key)) {
         seen.add(key);
-        unique.push({ ...link, weight: Math.max(1, link.weight || 1) });
+        unique.push({ ...link, weight: Math.max(1, link.weight || 1), edgeType: link.edgeType || 'file-reference' });
       }
     }
 
@@ -282,7 +282,7 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
         return;
       }
 
-      fileLinks.push({ source, target, weight: 1 });
+      fileLinks.push({ source, target, weight: 1, edgeType: 'file-reference' });
     };
 
     const importPattern = /(?:import|export)\s+(?:[\w*{}\s,]+\s+from\s+)?['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)|require\(\s*['"]([^'"]+)['"]\s*\)/g;

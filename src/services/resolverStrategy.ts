@@ -8,6 +8,52 @@ export enum ResolverStrategyType {
   Generic = 'generic',
 }
 
+export const RESOLVER_TYPE_METADATA: Record<ResolverStrategyType, { label: string; supportedExtensions: readonly string[]; edgeTypes: readonly string[] }> = {
+  [ResolverStrategyType.DotNet]: {
+    label: 'DotNetDependencyResolver (Roslyn .NET strategy)',
+    supportedExtensions: ['.cs', '.razor'],
+    edgeTypes: ['file-reference'],
+  },
+  [ResolverStrategyType.TypeScript]: {
+    label: 'TypeScriptDependencyResolver (TypeScript compiler strategy)',
+    supportedExtensions: ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts'],
+    edgeTypes: ['file-reference'],
+  },
+  [ResolverStrategyType.Python]: {
+    label: 'PythonCallChainResolver (ast-based call chain strategy)',
+    supportedExtensions: ['.py'],
+    edgeTypes: ['call-chain', 'import-bound-call'],
+  },
+  [ResolverStrategyType.Generic]: {
+    label: 'GenericSemanticFileDependencyResolver (generic file-based strategy)',
+    supportedExtensions: ['.cs', '.razor', '.js', '.jsx', '.ts', '.tsx', '.md', '.markdown'],
+    edgeTypes: ['file-reference'],
+  },
+};
+
+export function normalizeResolverType(type?: string | ResolverStrategyType): ResolverStrategyType {
+  const rawValue = (type ?? ResolverStrategyType.Generic).toString().trim().toLowerCase();
+  if (Object.values(ResolverStrategyType).includes(rawValue as ResolverStrategyType)) {
+    return rawValue as ResolverStrategyType;
+  }
+
+  throw new Error(`Unsupported resolver type: ${type}. Supported values: ${listResolverTypes().join(', ')}`);
+}
+
+export function listResolverTypes(): ResolverStrategyType[] {
+  return Object.values(ResolverStrategyType);
+}
+
+export function getSupportedFileTypesForResolver(type?: string | ResolverStrategyType): string[] {
+  const normalized = normalizeResolverType(type);
+  return [...RESOLVER_TYPE_METADATA[normalized].supportedExtensions];
+}
+
+export function getEdgeTypesForResolver(type?: string | ResolverStrategyType): string[] {
+  const normalized = normalizeResolverType(type);
+  return [...RESOLVER_TYPE_METADATA[normalized].edgeTypes];
+}
+
 export abstract class ResolverStrategy {
   abstract readonly type: ResolverStrategyType;
   abstract readonly label: string;

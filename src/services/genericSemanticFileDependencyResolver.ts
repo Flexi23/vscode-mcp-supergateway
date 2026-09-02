@@ -6,6 +6,7 @@ export interface GraphLink {
   source: string;
   target: string;
   weight: number;
+  edgeType: string;
 }
 
 type GraphUri = { fsPath: string; toString(): string };
@@ -39,7 +40,7 @@ export class GenericSemanticFileDependencyResolver extends ResolverStrategy {
         return;
       }
 
-      fileLinks.push({ source, target, weight: 1 });
+      fileLinks.push({ source, target, weight: 1, edgeType: 'file-reference' });
     };
 
     const extension = path.extname(filePath).toLowerCase();
@@ -82,7 +83,7 @@ export class GenericSemanticFileDependencyResolver extends ResolverStrategy {
 
     for (const target of targets) {
       const targetPath = target.replace(/\./g, '/');
-      fileLinks.push({ source, target: targetPath, weight: 1 });
+      fileLinks.push({ source, target: targetPath, weight: 1, edgeType: 'file-reference' });
     }
 
     return this.dedupeLinks(fileLinks.filter((link) => link.source !== link.target));
@@ -145,10 +146,10 @@ export class GenericSemanticFileDependencyResolver extends ResolverStrategy {
     const unique: GraphLink[] = [];
 
     for (const link of links) {
-      const key = `${link.source}\u0000${link.target}`;
+      const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
       if (!seen.has(key)) {
         seen.add(key);
-        unique.push({ ...link, weight: Math.max(1, link.weight || 1) });
+        unique.push({ ...link, weight: Math.max(1, link.weight || 1), edgeType: link.edgeType || 'file-reference' });
       }
     }
 

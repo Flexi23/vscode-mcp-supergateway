@@ -1,48 +1,74 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { SemanticEdgeResolutionStrategyDispatcher, TypeScriptDependencyResolver } from './services/semanticEdgeResolutionStrategyDispatcher';
+import { DotNetDependencyResolver } from './services/dotnetDependencyResolver';
 import { PythonCallChainResolver } from './services/pythonCallChainResolver';
-import { requireEnv } from './config/env';
+import { getEdgeTypesForResolver, getSupportedFileTypesForResolver, listResolverTypes, normalizeResolverType, ResolverStrategyType } from './services/resolverStrategy';
+import { SemanticEdgeResolutionStrategyDispatcher, TypeScriptDependencyResolver } from './services/semanticEdgeResolutionStrategyDispatcher';
 
 const workspaceRoot = '/workspace';
 
-const listFilesSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for C# files. Defaults to /workspace.'),
+const resolverTypeSchema = z.enum(['dotnet', 'typescript', 'python', 'generic']);
+
+const filesByResolverSchema = z.object({
+  root: z.string().optional().default(workspaceRoot),
+  resolver: resolverTypeSchema.optional().default('generic'),
   include: z.array(z.string()).optional().describe('Optional list of directory prefixes to include.'),
 });
 
-const dependencyGraphSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for C# files. Defaults to /workspace.'),
+const resolveSemanticEdgesSchema = z.object({
+  root: z.string().optional().default(workspaceRoot),
+  resolver: resolverTypeSchema.optional().default('generic'),
   maxEdges: z.number().int().positive().max(5000).optional().describe('Maximum number of edges to return.'),
 });
 
-const typescriptListFilesSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for TypeScript/JavaScript files. Defaults to /workspace.'),
-  include: z.array(z.string()).optional().describe('Optional list of directory prefixes to include.'),
+const edgeTypesByResolverSchema = z.object({
+  resolver: resolverTypeSchema.optional().describe('Optional resolver to inspect. If omitted, all resolvers are returned.'),
 });
 
-const typescriptDependencyGraphSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for TypeScript/JavaScript files. Defaults to /workspace.'),
-  maxEdges: z.number().int().positive().max(5000).optional().describe('Maximum number of edges to return.'),
-});
+const filesByResolverShape = filesByResolverSchema.shape as any;
+const resolveSemanticEdgesShape = resolveSemanticEdgesSchema.shape as any;
+const edgeTypesByResolverShape = edgeTypesByResolverSchema.shape as any;
 
-const pythonListFilesSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for Python files. Defaults to /workspace.'),
-  include: z.array(z.string()).optional().describe('Optional list of directory prefixes to include.'),
-});
+function filterIncludedFiles(files: readonly string[], include?: readonly string[]): string[] {
+  if (!include || include.length === 0) {
+    return [...files];
+  }
 
-const pythonCallChainSchema = z.object({
-  root: z.string().optional().describe('Directory to scan for Python files. Defaults to /workspace.'),
-  maxEdges: z.number().int().positive().max(5000).optional().describe('Maximum number of edges to return.'),
-});
+  return files.filter((file) => include.some((prefix) => file.includes(prefix)));
+}
 
-const listFilesShape = listFilesSchema.shape as any;
-const dependencyGraphShape = dependencyGraphSchema.shape as any;
-const typescriptListFilesShape = typescriptListFilesSchema.shape as any;
-const typescriptDependencyGraphShape = typescriptDependencyGraphSchema.shape as any;
-const pythonListFilesShape = pythonListFilesSchema.shape as any;
-const pythonCallChainShape = pythonCallChainSchema.shape as any;
+function listFilesForResolver(root: string, resolver: ResolverStrategyType): string[] {
+  switch (resolver) {
+    case ResolverStrategyType.DotNet: {
+      const dispatcher = new SemanticEdgeResolutionStrategyDispatcher(root);
+      return dispatcher.collectSemanticFiles(root)
+        .map((file) => file.fsPath)
+        .filter((filePath) => new DotNetDependencyResolver().supports(filePath));
+    }
+    case ResolverStrategyType.TypeScript:
+      return new TypeScriptDependencyResolver().collectTypeScriptFiles(root).map((file) => file.fsPath);
+    case ResolverStrategyType.Python:
+      return new PythonCallChainResolver().collectPythonFiles(root);
+    case ResolverStrategyType.Generic:
+    default:
+      return new SemanticEdgeResolutionStrategyDispatcher(root).collectSemanticFiles(root).map((file) => file.fsPath);
+  }
+}
+
+async function resolveSemanticEdgesForResolver(root: string, resolver: ResolverStrategyType): Promise<Array<{ source: string; target: string; weight: number }>> {
+  switch (resolver) {
+    case ResolverStrategyType.DotNet:
+      return new DotNetDependencyResolver().setRootDir(root).extractEdges(root);
+    case ResolverStrategyType.TypeScript:
+      return new TypeScriptDependencyResolver().setRootDir(root).extractTypeScriptEdgesFromFilesystem(root);
+    case ResolverStrategyType.Python:
+      return new PythonCallChainResolver().setRootDir(root).extractCallChainEdges(root);
+    case ResolverStrategyType.Generic:
+    default:
+      return new SemanticEdgeResolutionStrategyDispatcher(root).extractEdgesFromFilesystem(root);
+  }
+}
 
 const server = new McpServer(
   {
@@ -54,116 +80,102 @@ const server = new McpServer(
   },
 );
 
-server.registerTool('csharp_list_workspace_files', {
-  description: 'List all semantic source files under the configured workspace root.',
-  inputSchema: listFilesShape,
-}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = listFilesSchema.parse(args ?? {});
-  const root = parsed.root || workspaceRoot;
-  const extractor = new SemanticEdgeResolutionStrategyDispatcher(root);
-  const files = extractor.collectSemanticFiles(root);
-  const included = parsed.include && parsed.include.length > 0
-    ? files.filter((file: { fsPath: string }) => parsed.include!.some((prefix: string) => file.fsPath.includes(prefix)))
-    : files;
+server.registerTool('list_resolvers', {
+  description: 'List the available semantic resolver types, their supported file extensions, and their edge categories.',
+  inputSchema: {},
+}, async () => {
+  const resolvers = listResolverTypes().map((type) => ({
+    type,
+    label: `${type} resolver`,
+    supportedFileTypes: getSupportedFileTypesForResolver(type),
+    edgeTypes: getEdgeTypesForResolver(type),
+  }));
 
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify({ root, total: included.length, files: included.map((file: { fsPath: string }) => file.fsPath) }, null, 2),
+      text: JSON.stringify({ resolvers }, null, 2),
     }],
   };
 });
 
-server.registerTool('csharp_extract_dependency_graph', {
-  description: 'Extract a semantic dependency graph from the workspace and return the graph links as JSON.',
-  inputSchema: dependencyGraphShape,
+server.registerTool('edge_types_by_resolver', {
+  description: 'List the semantic edge categories emitted by one resolver or by all resolvers.',
+  inputSchema: edgeTypesByResolverShape,
 }, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = dependencyGraphSchema.parse(args ?? {});
+  const parsed = edgeTypesByResolverSchema.parse(args ?? {});
+
+  if (parsed.resolver) {
+    const resolver = normalizeResolverType(parsed.resolver);
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ resolver, edgeTypes: getEdgeTypesForResolver(resolver) }, null, 2),
+      }],
+    };
+  }
+
+  const resolvers = Object.fromEntries(
+    listResolverTypes().map((type) => [type, getEdgeTypesForResolver(type)]),
+  );
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ resolvers }, null, 2),
+    }],
+  };
+});
+
+server.registerTool('file_types_by_resolver', {
+  description: 'List the supported file types for each semantic resolver.',
+  inputSchema: {},
+}, async () => {
+  const types = listResolverTypes().map((type) => ({
+    type,
+    supportedFileTypes: getSupportedFileTypesForResolver(type),
+  }));
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ resolvers: types }, null, 2),
+    }],
+  };
+});
+
+server.registerTool('files_by_resolver', {
+  description: 'List workspace files for the selected resolver type.',
+  inputSchema: filesByResolverShape,
+}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
+  const parsed = filesByResolverSchema.parse(args ?? {});
   const root = parsed.root || workspaceRoot;
-  const extractor = new SemanticEdgeResolutionStrategyDispatcher(root);
-  const allLinks = await extractor.extractEdgesFromFilesystem(root);
+  const resolver = normalizeResolverType(parsed.resolver);
+  const files = listFilesForResolver(root, resolver);
+  const included = filterIncludedFiles(files, parsed.include);
+
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ root, resolver, total: included.length, files: included }, null, 2),
+    }],
+  };
+});
+
+server.registerTool('resolve_semantic_edges', {
+  description: 'Resolve a dependency or call graph for the selected resolver type.',
+  inputSchema: resolveSemanticEdgesShape,
+}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
+  const parsed = resolveSemanticEdgesSchema.parse(args ?? {});
+  const root = parsed.root || workspaceRoot;
+  const resolver = normalizeResolverType(parsed.resolver);
+  const allLinks = await resolveSemanticEdgesForResolver(root, resolver);
   const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
 
   return {
     content: [{
       type: 'text' as const,
-      text: JSON.stringify({ root, totalEdges: allLinks.length, edges: limited }, null, 2),
-    }],
-  };
-});
-
-server.registerTool('typescript_list_workspace_files', {
-  description: 'List TypeScript and JavaScript source files in the configured workspace root.',
-  inputSchema: typescriptListFilesShape,
-}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = typescriptListFilesSchema.parse(args ?? {});
-  const root = parsed.root || workspaceRoot;
-  const extractor = new TypeScriptDependencyResolver();
-  const files = extractor.collectTypeScriptFiles(root);
-  const included = parsed.include && parsed.include.length > 0
-    ? files.filter((file: { fsPath: string }) => parsed.include!.some((prefix: string) => file.fsPath.includes(prefix)))
-    : files;
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({ root, total: included.length, files: included.map((file: { fsPath: string }) => file.fsPath) }, null, 2),
-    }],
-  };
-});
-
-server.registerTool('typescript_extract_dependency_graph', {
-  description: 'Extract a TypeScript/JavaScript import dependency graph from the workspace and return the graph links as JSON.',
-  inputSchema: typescriptDependencyGraphShape,
-}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = typescriptDependencyGraphSchema.parse(args ?? {});
-  const root = parsed.root || workspaceRoot;
-  const extractor = new TypeScriptDependencyResolver();
-  const allLinks = await extractor.extractTypeScriptEdgesFromFilesystem(root);
-  const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({ root, totalEdges: allLinks.length, edges: limited }, null, 2),
-    }],
-  };
-});
-
-server.registerTool('python_list_workspace_files', {
-  description: 'List Python source files in the configured workspace root.',
-  inputSchema: pythonListFilesShape,
-}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = pythonListFilesSchema.parse(args ?? {});
-  const root = parsed.root || workspaceRoot;
-  const extractor = new PythonCallChainResolver();
-  const files = extractor.collectPythonFiles(root);
-  const included = parsed.include && parsed.include.length > 0
-    ? files.filter((file: string) => parsed.include!.some((prefix: string) => file.includes(prefix)))
-    : files;
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({ root, total: included.length, files: included }, null, 2),
-    }],
-  };
-});
-
-server.registerTool('python_extract_call_chain_graph', {
-  description: 'Resolve Python call chains via the stdlib ast module and return the resulting file-level call graph as JSON.',
-  inputSchema: pythonCallChainShape,
-}, async (args: Record<string, unknown> = {}, _extra: unknown) => {
-  const parsed = pythonCallChainSchema.parse(args ?? {});
-  const root = parsed.root || workspaceRoot;
-  const extractor = new PythonCallChainResolver();
-  const allLinks = await extractor.extractCallChainEdges(root);
-  const limited = typeof parsed.maxEdges === 'number' ? allLinks.slice(0, parsed.maxEdges) : allLinks;
-
-  return {
-    content: [{
-      type: 'text' as const,
-      text: JSON.stringify({ root, totalEdges: allLinks.length, edges: limited }, null, 2),
+      text: JSON.stringify({ root, resolver, totalEdges: allLinks.length, edges: limited }, null, 2),
     }],
   };
 });

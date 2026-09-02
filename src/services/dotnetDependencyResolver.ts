@@ -8,6 +8,7 @@ export interface GraphLink {
   source: string;
   target: string;
   weight: number;
+  edgeType: string;
 }
 
 export class DotNetDependencyResolver extends ResolverStrategy {
@@ -100,14 +101,15 @@ export class DotNetDependencyResolver extends ResolverStrategy {
       return [];
     }
 
-    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-dependency-resolver-'));
-    const projectDir = path.join(tempRoot, 'resolver');
-    fs.mkdirSync(projectDir, { recursive: true });
+    try {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-dependency-resolver-'));
+      const projectDir = path.join(tempRoot, 'resolver');
+      fs.mkdirSync(projectDir, { recursive: true });
 
-    const projectFile = path.join(projectDir, 'DotNetDependencyResolver.csproj');
-    const programFile = path.join(projectDir, 'Program.cs');
+      const projectFile = path.join(projectDir, 'DotNetDependencyResolver.csproj');
+      const programFile = path.join(projectDir, 'Program.cs');
 
-    const projectXml = `
+      const projectXml = `
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -122,7 +124,7 @@ export class DotNetDependencyResolver extends ResolverStrategy {
 </Project>
 `.trim();
 
-    const programCode = String.raw`
+      const programCode = String.raw`
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -229,7 +231,7 @@ foreach (var tree in syntaxTrees)
             continue;
         }
 
-        var key = sourcePath + "\u0000" + targetPath;
+        var key = sourcePath + "\u0000" + targetPath + "\u0000file-reference";
         if (!linksByKey.ContainsKey(key))
         {
             linksByKey[key] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -242,8 +244,9 @@ foreach (var tree in syntaxTrees)
 var links = linksByKey
     .Select(pair => new
     {
-        source = pair.Key.Split("\u0000", 2)[0],
-        target = pair.Key.Split("\u0000", 2)[1],
+        source = pair.Key.Split("\u0000", 3)[0],
+        target = pair.Key.Split("\u0000", 3)[1],
+        edgeType = pair.Key.Split("\u0000", 3)[2],
         weight = Math.Max(1, pair.Value.Count)
     })
     .OrderBy(link => link.source, StringComparer.OrdinalIgnoreCase)
@@ -253,41 +256,63 @@ var links = linksByKey
 Console.WriteLine(JsonSerializer.Serialize(new { links }));
 `.trim();
 
-    fs.writeFileSync(projectFile, projectXml, 'utf8');
-    fs.writeFileSync(programFile, programCode, 'utf8');
+      fs.writeFileSync(projectFile, projectXml, 'utf8');
+      fs.writeFileSync(programFile, programCode, 'utf8');
 
-    const oneOfBatch = Math.min(1, files.length);
-    onProgress?.(`[DotNetDependencyResolver] building Roslyn graph for ${csFiles.length} C# file(s)`, 5, 0, Math.max(csFiles.length, 1));
+      onProgress?.(`[DotNetDependencyResolver] building Roslyn graph for ${csFiles.length} C# file(s)`, 5, 0, Math.max(csFiles.length, 1));
 
-    const result = spawnSync('dotnet', ['run', '--project', projectFile, '--', '--root', rootDir], {
-      encoding: 'utf8',
-      cwd: projectDir,
-      env: { ...process.env },
-      maxBuffer: 100 * 1024 * 1024,
-    });
+      const result = spawnSync('dotnet', ['run', '--project', projectFile, '--', '--root', rootDir], {
+        encoding: 'utf8',
+        cwd: projectDir,
+        env: { ...process.env },
+        maxBuffer: 100 * 1024 * 1024,
+      });
 
-    if (result.status !== 0) {
-      const message = (result.stderr || result.stdout || 'Roslyn dependency resolver failed').trim();
-      throw new Error(message || 'Roslyn dependency resolver failed');
-    }
+      const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : String(result.stderr ?? '').trim();
+      const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : String(result.stdout ?? '').trim();
 
-    const stdout = (result.stdout || '').trim();
-    if (!stdout) {
-      return [];
-    }
+      if (result.error) {
+        const errorMessage = result.error instanceof Error ? result.error.message : String(result.error);
+        const details = [
+          `spawn: ${errorMessage}`,
+          stderr ? `stderr: ${stderr}` : undefined,
+          stdout ? `stdout: ${stdout}` : undefined,
+        ].filter(Boolean).join(' | ');
 
-    try {
-      const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number }> };
+        console.warn(`[DotNetDependencyResolver] Roslyn dependency resolver failed: ${details || 'dotnet could not be started'}`);
+        return [];
+      }
+
+      if (result.status !== 0) {
+        const details = [
+          `exitCode: ${result.status}`,
+          stderr ? `stderr: ${stderr}` : undefined,
+          stdout ? `stdout: ${stdout}` : undefined,
+        ].filter(Boolean).join(' | ');
+
+        console.warn(`[DotNetDependencyResolver] Roslyn dependency resolver failed: ${details || 'dotnet exited with a non-zero status'}`);
+        return [];
+      }
+
+      const stdoutText = stdout;
+      if (!stdout) {
+        return [];
+      }
+
+      const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number; edgeType?: string }> };
       const links = Array.isArray(payload.links) ? payload.links.map((entry) => ({
         source: entry.source,
         target: entry.target,
         weight: Math.max(1, entry.weight ?? 1),
+        edgeType: entry.edgeType || 'file-reference',
       })) : [];
 
       onProgress?.(`[DotNetDependencyResolver] Roslyn graph ready: ${links.length} edge(s)`, 100, csFiles.length, Math.max(csFiles.length, 1));
       return links;
     } catch (error) {
-      throw new Error(`Failed to parse Roslyn dependency output: ${String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[DotNetDependencyResolver] Roslyn dependency resolution failed; continuing without Roslyn results: ${message}`);
+      return [];
     }
   }
 
@@ -314,7 +339,7 @@ Console.WriteLine(JsonSerializer.Serialize(new { links }));
           continue;
         }
 
-        result.push({ source, target: this.normalizedPath(rootDir, resolved), weight: 1 });
+        result.push({ source, target: this.normalizedPath(rootDir, resolved), weight: 1, edgeType: 'file-reference' });
       }
     }
 
@@ -348,10 +373,10 @@ Console.WriteLine(JsonSerializer.Serialize(new { links }));
     const result: GraphLink[] = [];
 
     for (const link of links) {
-      const key = `${link.source}\u0000${link.target}`;
+      const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
       if (!seen.has(key)) {
         seen.add(key);
-        result.push({ ...link, weight: Math.max(1, link.weight || 1) });
+        result.push({ ...link, weight: Math.max(1, link.weight || 1), edgeType: link.edgeType || 'file-reference' });
       }
     }
 
