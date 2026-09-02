@@ -16,6 +16,11 @@ const indexJobs = new Map<string, IndexJobState>();
 type IndexJobUpdateListener = (repoPath: string, job: IndexJobState) => void;
 let indexJobUpdateListener: IndexJobUpdateListener | null = null;
 
+// listCodebaseMemoryProjects spawns npx synchronously (blocking the whole event loop);
+// cache briefly so a single request/poll cycle doesn't pay that cost multiple times.
+const PROJECT_LIST_CACHE_TTL_MS = 4000;
+const projectListCache = new Map<string, { fetchedAt: number; records: CodebaseMemoryProjectRecord[] }>();
+
 export function getPersistedProjectIndexStates(cacheDir: string): Record<string, IndexJobState> {
   const records = listCodebaseMemoryProjects(cacheDir);
   const persistedStates: Record<string, IndexJobState> = {};
@@ -86,12 +91,17 @@ function normalizeProjectRecord(project: Record<string, unknown>): CodebaseMemor
     return null;
   }
 
+  // The CLI's list_projects output has no explicit status field; a project with
+  // recorded graph nodes has already been indexed at least once.
+  const nodeCount = typeof project.nodes === 'number' ? project.nodes : Number(project.nodes ?? 0);
+  const inferredStatus = typeof project.status === 'string' ? project.status : nodeCount > 0 ? 'success' : 'unchecked';
+
   return {
     name: rawName ?? fallbackName,
     project: rawName ?? fallbackName,
     path: rawPath ?? rawName ?? fallbackName,
     root_path: rawPath ?? rawName ?? fallbackName,
-    status: typeof project.status === 'string' ? project.status : 'unchecked',
+    status: inferredStatus,
   };
 }
 
@@ -99,16 +109,36 @@ export function getPersistedProjectRecords(cacheDir: string): CodebaseMemoryProj
   return listCodebaseMemoryProjects(cacheDir);
 }
 
+function extractProjectEntries(payload: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(payload)) {
+    return payload as Array<Record<string, unknown>>;
+  }
+  const record = payload as Record<string, unknown> | null | undefined;
+  if (Array.isArray(record?.projects)) {
+    return record.projects as Array<Record<string, unknown>>;
+  }
+  const structured = record?.structuredContent as Record<string, unknown> | undefined;
+  if (Array.isArray(structured?.projects)) {
+    return structured.projects as Array<Record<string, unknown>>;
+  }
+  return [];
+}
+
 export function listCodebaseMemoryProjects(cacheDir?: string): CodebaseMemoryProjectRecord[] {
   if (!cacheDir) {
     return [];
+  }
+
+  const cached = projectListCache.get(cacheDir);
+  if (cached && Date.now() - cached.fetchedAt < PROJECT_LIST_CACHE_TTL_MS) {
+    return cached.records;
   }
 
   const envOverride = process.env.CBM_LIST_PROJECTS_FIXTURE;
   if (envOverride) {
     try {
       const payload = JSON.parse(envOverride) as Record<string, unknown>;
-      const entries = Array.isArray(payload?.projects) ? payload.projects : Array.isArray(payload) ? payload : [];
+      const entries = extractProjectEntries(payload);
       const normalized = (entries as Array<Record<string, unknown>>)
         .map((entry: Record<string, unknown>) => normalizeProjectRecord(entry ?? {}))
         .filter((entry): entry is CodebaseMemoryProjectRecord => !!entry);
@@ -124,25 +154,28 @@ export function listCodebaseMemoryProjects(cacheDir?: string): CodebaseMemoryPro
   try {
     const result = childProcess.spawnSync(
       'npx',
-      ['-y', 'codebase-memory-mcp', 'cli', 'list_projects', '--json', '{}'],
+      ['--no-install', 'codebase-memory-mcp', 'cli', 'list_projects', '--json', '{}'],
       { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, encoding: 'utf8' },
     );
 
     if (result.status === 0 && result.stdout.trim()) {
       const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-      const entries = Array.isArray(payload?.projects) ? payload.projects : Array.isArray(payload) ? payload : [];
+      const entries = extractProjectEntries(payload);
       const normalized = (entries as Array<Record<string, unknown>>)
         .map((entry: Record<string, unknown>) => normalizeProjectRecord(entry ?? {}))
         .filter((entry): entry is CodebaseMemoryProjectRecord => !!entry);
 
       if (normalized.length > 0) {
-        return normalized.sort((left, right) => (left.name ?? '').localeCompare(right.name ?? ''));
+        const sorted = normalized.sort((left, right) => (left.name ?? '').localeCompare(right.name ?? ''));
+        projectListCache.set(cacheDir, { fetchedAt: Date.now(), records: sorted });
+        return sorted;
       }
     }
   } catch {
     // fall back to empty list — the runtime list must come from the CBM CLI, not from the SQLite cache.
   }
 
+  projectListCache.set(cacheDir, { fetchedAt: Date.now(), records: [] });
   return [];
 }
 

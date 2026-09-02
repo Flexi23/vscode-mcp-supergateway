@@ -8,6 +8,7 @@ import {
   getIndexJobsSnapshot,
   indexRepository,
   mergeWorkspaceProjectRows,
+  resolveRuntimeWorkspaceRoot,
   setIndexJobUpdateListener,
 } from './codebaseMemory';
 
@@ -33,11 +34,68 @@ function isCbmUiRequest(req: http.IncomingMessage, requestUrl: URL): boolean {
   const referer = req.headers.referer ?? '';
   const isCbmReferer = referer.includes('/cbm/');
   const pathname = requestUrl.pathname;
-  const cbmAssetOrApi = pathname.startsWith('/assets/') || pathname.startsWith('/api/') || pathname.startsWith('/@') || pathname.startsWith('/_') || pathname.startsWith('/favicon');
+  const cbmAssetOrApi = pathname === '/rpc' || pathname.startsWith('/assets/') || pathname.startsWith('/api/') || pathname.startsWith('/@') || pathname.startsWith('/_') || pathname.startsWith('/favicon');
   return isCbmReferer && cbmAssetOrApi;
 }
 
-function handleDashboardRoutes(
+// The msp-admin app is inlined directly into the dashboard (no iframe), so its own
+// fetch calls to root-absolute paths (/api/*, /auth/*, /health) need a plain, always-on
+// passthrough to the upstream — these prefixes are never used by our own dashboard routes.
+function isMspAdminApiRequest(requestUrl: URL): boolean {
+  const pathname = requestUrl.pathname;
+  return pathname === '/api' || pathname.startsWith('/api/') || pathname === '/auth/login' || pathname === '/auth/logout' || pathname === '/health';
+}
+
+function fetchUpstreamBody(port: number, requestPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const request = http.get({ hostname: '127.0.0.1', port, path: requestPath }, (response) => {
+      let data = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => { data += chunk; });
+      response.on('end', () => resolve(data));
+    });
+    request.on('error', reject);
+  });
+}
+
+// The admin app's stylesheet is a flat, non-nested block (no @media/@supports), so a
+// simple selector-by-selector rewrite is enough to scope it under our container div
+// instead of the document root — this couples us to that structural assumption holding
+// across upstream mcp-gateway versions.
+function scopeAdminCss(css: string, scope: string): string {
+  return css.replace(/([^{}]+)\{([^{}]*)\}/g, (_match, selectorList: string, body: string) => {
+    const scoped = selectorList
+      .split(',')
+      .map((raw) => raw.trim())
+      .filter(Boolean)
+      .map((selector) => {
+        if (selector === ':root' || selector === 'body') return scope;
+        if (selector === '*') return `${scope}, ${scope} *`;
+        return `${scope} ${selector}`;
+      })
+      .join(', ');
+    return `${scoped} {${body}}`;
+  });
+}
+
+async function renderMspAdminInline(mspGatewayPort: number): Promise<{ css: string; body: string } | null> {
+  try {
+    const html = await fetchUpstreamBody(mspGatewayPort, '/admin/');
+    const styleMatch = html.match(/<style>([\s\S]*?)<\/style>/);
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/);
+    if (!bodyMatch) {
+      return null;
+    }
+    return {
+      css: styleMatch ? scopeAdminCss(styleMatch[1], '#msp-admin-root') : '',
+      body: bodyMatch[1],
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function handleDashboardRoutes(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   requestUrl: URL,
@@ -50,6 +108,7 @@ function handleDashboardRoutes(
 
   if (requestUrl.pathname === '/' || requestUrl.pathname === '/dashboard') {
     const tab = requestUrl.searchParams.get('tab') ?? 'msp';
+    const inlineMspAdmin = tab === 'msp' ? (await renderMspAdminInline(runtime.mspGatewayPort)) ?? undefined : undefined;
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(buildDashboardHtml({
       activeTab: tab,
@@ -57,12 +116,14 @@ function handleDashboardRoutes(
       mspGatewayPort: runtime.mspGatewayPort,
       cbmUiPort: runtime.cbmUiPort,
       siyuanPort: runtime.siyuanPort,
+      inlineMspAdmin,
     }));
     return true;
   }
 
   if (requestUrl.pathname === '/msp' || requestUrl.pathname === '/cbm' || requestUrl.pathname === '/siyuan') {
     const tab = requestUrl.pathname.slice(1) as 'msp' | 'cbm' | 'siyuan';
+    const inlineMspAdmin = tab === 'msp' ? (await renderMspAdminInline(runtime.mspGatewayPort)) ?? undefined : undefined;
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(buildDashboardHtml({
       activeTab: tab,
@@ -70,19 +131,19 @@ function handleDashboardRoutes(
       mspGatewayPort: runtime.mspGatewayPort,
       cbmUiPort: runtime.cbmUiPort,
       siyuanPort: runtime.siyuanPort,
+      inlineMspAdmin,
     }));
     return true;
   }
 
-  if (requestUrl.pathname === '/msp-admin' || requestUrl.pathname.startsWith('/msp-admin/')) {
-    const upstreamSuffix = requestUrl.pathname.replace(/^\/msp-admin/, '') || '/';
-    const upstreamPath = `/admin${upstreamSuffix === '/' ? '' : upstreamSuffix}${requestUrl.search}`;
-    proxyRequestToUpstream(req, res, runtime.mspGatewayPort, requestUrl, true, false, true, upstreamPath);
-    return true;
-  }
-
   if (requestUrl.pathname === '/cbm/overview') {
-    const initialProjects = mergeWorkspaceProjectRows(runtime.cbmHostWorkspaceDir || runtime.cbmDefaultPath, runtime.cbmCacheDir);
+    // Render directory names immediately from a fast fs scan; the persisted
+    // index status (which shells out to the CBM CLI) is fetched async by the client.
+    const resolvedRoot = resolveRuntimeWorkspaceRoot(runtime.cbmHostWorkspaceDir || runtime.cbmDefaultPath, runtime.cbmDefaultPath);
+    const initialProjects = discoverProjectRoots(resolvedRoot).map((rootPath) => {
+      const name = path.basename(rootPath) || 'project';
+      return { name, project: name, path: rootPath, root_path: rootPath, status: 'checking', indexed: false };
+    });
 
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(buildCbmOverviewHtml({ cbmUiPort: runtime.cbmUiPort, initialProjects }));
@@ -101,8 +162,11 @@ function handleDashboardRoutes(
     return true;
   }
 
-  if (isCbmUiRequest(req, requestUrl)) {
-    proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true);
+  if (requestUrl.pathname === '/cbm/graph' || requestUrl.pathname.startsWith('/cbm/graph/')) {
+    // The graph UI process only binds to the container's loopback interface, so its own
+    // port isn't reachable via the docker port mapping; proxy it through the dashboard port.
+    const upstreamPath = `${requestUrl.pathname.replace(/^\/cbm\/graph/, '') || '/'}${requestUrl.search}`;
+    proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true, upstreamPath);
     return true;
   }
 
@@ -160,6 +224,7 @@ function proxyRequestToUpstream(
   redirectRootToAdmin: boolean,
   stripFrameHeaders: boolean,
   overridePath?: string,
+  locationRewrite?: { upstreamPrefix: string; mountPrefix: string },
 ) {
   const headers = { ...req.headers, host: `127.0.0.1:${targetPort}` };
   let targetPath = overridePath ?? req.url ?? '/';
@@ -195,7 +260,19 @@ function proxyRequestToUpstream(
         delete responseHeaders['x-frame-options'];
         delete responseHeaders['content-security-policy'];
       }
-      res.writeHead(upstreamResponse.statusCode || 502, responseHeaders);
+      if (locationRewrite && typeof responseHeaders.location === 'string') {
+        const { upstreamPrefix, mountPrefix } = locationRewrite;
+        if (responseHeaders.location === upstreamPrefix || responseHeaders.location.startsWith(`${upstreamPrefix}/`)) {
+          responseHeaders.location = mountPrefix + responseHeaders.location.slice(upstreamPrefix.length);
+        }
+      }
+      const statusCode = upstreamResponse.statusCode || 502;
+      if (statusCode >= 300 && statusCode < 400) {
+        // Browsers cache redirects indefinitely even without explicit headers;
+        // without this, a stale Location survives long after a routing fix.
+        responseHeaders['cache-control'] = 'no-store';
+      }
+      res.writeHead(statusCode, responseHeaders);
       upstreamResponse.pipe(res);
     },
   );
@@ -243,7 +320,7 @@ export function startDashboardServer(
     cbmHostWorkspaceDir,
   };
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
 
     if (req.method === 'GET' && req.url === '/ping') {
@@ -252,11 +329,21 @@ export function startDashboardServer(
       return;
     }
 
-    if (handleDashboardRoutes(req, res, requestUrl, runtime, dashboardEnabled)) {
+    if (await handleDashboardRoutes(req, res, requestUrl, runtime, dashboardEnabled)) {
       return;
     }
 
     if (handleCbmActionRoutes(req, res, requestUrl, runtime, dashboardEnabled)) {
+      return;
+    }
+
+    if (dashboardEnabled && isCbmUiRequest(req, requestUrl)) {
+      proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true);
+      return;
+    }
+
+    if (dashboardEnabled && isMspAdminApiRequest(requestUrl)) {
+      proxyRequestToUpstream(req, res, runtime.mspGatewayPort, requestUrl, true, false, true);
       return;
     }
 
@@ -336,7 +423,7 @@ export function startForwardProxy(
     cbmHostWorkspaceDir,
   };
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
 
     if (req.method === 'GET' && req.url === '/ping') {
@@ -345,7 +432,7 @@ export function startForwardProxy(
       return;
     }
 
-    if (handleDashboardRoutes(req, res, requestUrl, runtime, dashboardEnabled)) {
+    if (await handleDashboardRoutes(req, res, requestUrl, runtime, dashboardEnabled)) {
       return;
     }
 

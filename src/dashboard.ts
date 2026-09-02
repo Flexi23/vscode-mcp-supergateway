@@ -15,18 +15,21 @@ export function buildDashboardHtml({
   mspGatewayPort,
   cbmUiPort,
   siyuanPort = 6806,
+  inlineMspAdmin,
 }: {
   activeTab?: string;
   adminUiPort: number;
   mspGatewayPort: number;
   cbmUiPort: number;
   siyuanPort?: number;
+  inlineMspAdmin?: { css: string; body: string };
 }) {
   const tabs: Record<string, { label: string; href: string; source: string }> = {
     msp: {
       label: 'MSP Stack',
       href: '/msp',
-      source: `http://127.0.0.1:${adminUiPort}/msp-admin`,
+      // Trailing slash avoids the upstream's own redirect round-trip on every load.
+      source: `http://127.0.0.1:${adminUiPort}/msp-admin/`,
     },
     cbm: {
       label: 'CBM',
@@ -150,6 +153,12 @@ export function buildDashboardHtml({
         border: 0;
         background: #020817;
       }
+      #msp-admin-root {
+        width: 100%;
+        min-height: calc(100vh - 88px);
+        overflow: auto;
+      }
+      ${inlineMspAdmin?.css ?? ''}
     </style>
   </head>
   <body>
@@ -159,7 +168,9 @@ export function buildDashboardHtml({
     </header>
     <main class="content-panel">
       <div class="frame-shell">
-        <iframe class="app-iframe" src="${activeView.source}" title="${activeView.label} UI" loading="lazy"></iframe>
+        ${safeTab === 'msp' && inlineMspAdmin
+          ? `<div id="msp-admin-root">${inlineMspAdmin.body}</div>`
+          : `<iframe class="app-iframe" src="${activeView.source}" title="${activeView.label} UI" loading="lazy"></iframe>`}
       </div>
     </main>
   </body>
@@ -202,23 +213,24 @@ export function buildCbmOverviewHtml({
         const projectPath = project.root_path || project.path || project.project || projectName;
         const encodedPath = encodeURIComponent(projectPath);
         const rowState = resolveInitialProjectRowState(project);
-        const statusText = rowState === 'ingesting semantics' ? 'ingesting semantics' : rowState;
         const actionMarkup = rowState === 'active'
-          ? `<a class="graph-link" href="http://127.0.0.1:${cbmUiPort}/?tab=graph&project=${encodeURIComponent(projectName)}" target="_blank" rel="noopener noreferrer">Open 3D graph</a>`
+          ? `<a class="btn secondary graph-link" href="/cbm/graph?tab=graph&project=${encodeURIComponent(projectName)}" target="_blank" rel="noopener noreferrer">Open 3D graph</a><button type="button" class="btn secondary semantic-button" data-path="${encodedPath}">Transfer semantic edges</button>`
           : rowState === 'indexing'
-            ? '<span class="muted-action">in progress…</span>'
-            : rowState === 'checking'
-              ? '<span class="muted-action">checking…</span>'
-              : rowState === 'idle'
-                ? `<button type="button" class="index-button" data-path="${encodedPath}">Index</button><button type="button" class="semantic-button" data-path="${encodedPath}">Transfer semantic edges</button>`
-                : '';
-        return `<tr data-path="${encodedPath}" data-indexed="${String(Boolean(project.indexed))}" data-state="${rowState}">
-          <td>${projectName}</td>
-          <td class="status"><span class="status-pill ${rowState === 'ingesting semantics' ? 'ingesting-semantics' : rowState}">${statusText}</span></td>
-          <td class="actions">${actionMarkup}</td>
-        </tr>`;
+            ? '<span class="muted-action">indexing…</span>'
+            : rowState === 'ingesting semantics'
+              ? '<span class="muted-action">ingesting semantics…</span>'
+              : rowState === 'checking'
+                ? '<span class="muted-action">checking…</span>'
+                : rowState === 'idle' || rowState === 'unchecked'
+                  ? `<button type="button" class="btn index-button" data-path="${encodedPath}">Add to Index</button>`
+                  : '<span class="muted-action">—</span>';
+        return `<tr data-path="${encodedPath}" data-indexed="${String(Boolean(project.indexed))}" data-state="${rowState}">` +
+          `<td class="name">${projectName}</td>` +
+          `<td class="actions"><div class="actions-inner">${actionMarkup}</div></td>` +
+          `</tr>`;
       }).join('')
-    : '<tr><td colspan="3">No projects available yet.</td></tr>';
+    : '<tr><td colspan="2">No projects available yet.</td></tr>';
+
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -228,92 +240,50 @@ export function buildCbmOverviewHtml({
     <title>Codebase Memory — Project Overview</title>
     <style>
       :root {
-        color-scheme: light dark;
-        --bg: #0f172a;
-        --panel: rgba(15, 23, 42, 0.75);
-        --panel-alt: rgba(30, 41, 59, 0.95);
-        --border: rgba(148, 163, 184, 0.3);
-        --text: #e2e8f0;
-        --muted: #cbd5e1;
-        --accent: #38bdf8;
-        --accent-strong: #0ea5e9;
+        color-scheme: dark;
+        --bg: #0f1419; --panel: #171d24; --panel2: #1e2630; --border: #2a3441;
+        --text: #d8dee6; --muted: #8a97a5; --accent: #4da3ff; --ok: #3fb96a;
+        --warn: #e0a23c; --err: #e05c5c; --radius: 8px;
       }
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        font-family: "Consolas", "SFMono-Regular", "Menlo", monospace;
-        background: linear-gradient(180deg, #020817 0%, #0f172a 100%);
+        background: var(--bg);
         color: var(--text);
+        font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
       }
-      .panel { padding: 1rem 1.25rem; }
-      h1 { font-size: 1.1rem; margin: 0 0 0.75rem; }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
-      th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid rgba(148, 163, 184, 0.25); font-size: 0.9rem; }
-      td.status { text-transform: capitalize; }
-      .status-stack { display: flex; flex-direction: column; gap: 0.3rem; min-width: 120px; }
-      .status-pill { display: inline-block; padding: 0.15rem 0.45rem; border-radius: 999px; background: rgba(148, 163, 184, 0.18); border: 1px solid rgba(148, 163, 184, 0.2); }
-      .status-pill.unchecked, .status-pill.idle, .status-pill.checking { background: rgba(59, 130, 246, 0.08); border-color: rgba(96, 165, 250, 0.32); color: #bfdbfe; }
-      .status-pill.indexing { background: rgba(251, 191, 36, 0.18); border-color: rgba(251, 191, 36, 0.8); color: #fef3c7; box-shadow: 0 0 12px rgba(251, 191, 36, 0.14); }
-      .status-pill.active { background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.75); color: #dcfce7; box-shadow: 0 0 12px rgba(34, 197, 94, 0.18); }
-      .status-pill.ingesting-semantics { background: rgba(168, 85, 247, 0.18); border-color: rgba(168, 85, 247, 0.75); color: #ede9fe; box-shadow: 0 0 12px rgba(168, 85, 247, 0.16); }
-      .status-pill.error { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.8); color: #fecaca; }
-      .progress { width: 100%; height: 0.52rem; border-radius: 999px; overflow: hidden; background: rgba(148, 163, 184, 0.15); }
-      .progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #38bdf8, #a78bfa); }
-      .status-stack small { color: #bae6fd; font-weight: 600; }
-      tr.indexed-row { background: rgba(34, 197, 94, 0.05); box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.2); }
-      tr.indexing-row { background: rgba(251, 191, 36, 0.04); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.2); }
-      tr.active-row { background: rgba(34, 197, 94, 0.05); box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.2); }
-      tr.ingesting-row { background: rgba(168, 85, 247, 0.05); box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.2); }
-      td.actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-      button.index-button, button.semantic-button {
-        padding: 0.35rem 0.9rem;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.4);
-        background: #38bdf8;
-        color: #082f49;
-        font-weight: 600;
-        cursor: pointer;
-      }
-      button.semantic-button {
-        background: #a78bfa;
-        color: #1f113d;
-      }
-      button.index-button:disabled, button.semantic-button:disabled { opacity: 0.5; cursor: default; }
-      .muted-action { color: #cbd5e1; opacity: 0.8; }
-      a.graph-link {
-        color: #bae6fd;
-        text-decoration: none;
-        font-weight: 600;
-      }
-      a.graph-link:hover { text-decoration: underline; }
-      .graph-launcher {
-        margin: 0 0 1rem;
-        display: flex;
-        justify-content: flex-start;
-      }
-      .graph-launch-button {
-        display: inline-block;
-        padding: 0.55rem 0.9rem;
-        border-radius: 999px;
-        border: 1px solid rgba(56, 189, 248, 0.5);
-        background: rgba(14, 165, 233, 0.12);
-        color: #e0f2fe;
-        text-decoration: none;
-        font-weight: 700;
-      }
-      .graph-launch-button:hover { text-decoration: underline; }
+      .panel { padding: 18px 22px; max-width: 1200px; }
+      h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+      section.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+      th { color: var(--muted); font-weight: 500; font-size: 12px; }
+      col.col-name { width: 60%; }
+      col.col-actions { width: 40%; }
+      tr:last-child td { border-bottom: none; }
+      tbody tr:hover { background: rgba(77, 163, 255, 0.06); }
+      td.name { font-weight: 600; }
+      tr.indexed-row, tr.active-row { background: rgba(63, 185, 106, 0.06); }
+      tr.indexing-row { background: rgba(224, 162, 60, 0.06); }
+      tr.ingesting-row { background: rgba(77, 163, 255, 0.06); }
+      .actions-inner { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .btn { background: var(--accent); color: #06121f; border: none; border-radius: var(--radius); padding: 7px 14px; font-weight: 600; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-block; }
+      .btn.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+      .btn:disabled { opacity: .5; cursor: default; }
+      .muted-action { color: var(--muted); }
+      .graph-launcher { margin: 0 0 16px; display: flex; justify-content: flex-start; }
     </style>
   </head>
   <body>
     <div class="panel">
-      <h1>Codebase Memory Projects</h1>
-      <div class="graph-launcher">
-        <a class="graph-launch-button" href="http://127.0.0.1:${cbmUiPort}/?tab=stats" target="_blank" rel="noopener noreferrer">Open graph in new tab</a>
-      </div>
+      <h2>Codebase Memory Projects</h2>
+      <section class="panel">
       <table>
-        <thead><tr><th>Project</th><th>Status</th><th>Actions</th></tr></thead>
+        <colgroup><col class="col-name"><col class="col-actions"></colgroup>
+        <thead><tr><th>Project</th><th>Actions</th></tr></thead>
         <tbody id="project-table-body">${projectRowsHtml}</tbody>
       </table>
+      </section>
     </div>
     <script>
       const cbmUiPort = ${cbmUiPort};
@@ -355,47 +325,42 @@ export function buildCbmOverviewHtml({
         return 'unchecked';
       }
 
-      function renderStatusCell(statusEl, state, progress) {
-        const normalizedState = state === 'active' ? 'active' : state === 'indexing' ? 'indexing' : state === 'ingesting semantics' ? 'ingesting-semantics' : state === 'checking' ? 'checking' : state === 'unchecked' ? 'unchecked' : 'idle';
-        const statusText = state === 'ingesting semantics' ? 'ingesting semantics' : state;
-        const effectiveProgress = typeof progress === 'number' ? Math.min(100, Math.max(0, Math.round(progress))) : null;
-        statusEl.innerHTML = effectiveProgress === null
-          ? '<span class="status-pill ' + normalizedState + '">' + statusText + '</span>'
-          : '<div class="status-stack"><span class="status-pill ' + normalizedState + '">' + statusText + '</span><div class="progress"><span style="width:' + effectiveProgress + '%"></span></div><small>' + effectiveProgress + '%</small></div>';
-      }
-
-      function renderActionsCell(actionsEl, projectName, projectPath, state) {
+      function renderActionsCell(actionsEl, projectName, projectPath, state, progress) {
         const encodedPath = encodeURIComponent(projectPath);
-        const graphLink = '<a class="graph-link" href="http://127.0.0.1:' + cbmUiPort + '/?tab=graph&project=' + encodeURIComponent(projectName) + '" target="_blank" rel="noopener noreferrer">Open 3D graph</a>';
+        const graphLink = '<a class="btn secondary graph-link" href="/cbm/graph?tab=graph&project=' + encodeURIComponent(projectName) + '" target="_blank" rel="noopener noreferrer">Open 3D graph</a>';
+        const effectiveProgress = typeof progress === 'number' ? Math.min(100, Math.max(0, Math.round(progress))) : null;
+        const progressSuffix = effectiveProgress === null ? '' : ' ' + effectiveProgress + '%';
+
+        const setInner = (html) => {
+          actionsEl.innerHTML = '<div class="actions-inner">' + html + '</div>';
+        };
 
         if (state === 'active') {
-          actionsEl.innerHTML = graphLink;
+          setInner(graphLink + '<button type="button" class="btn secondary semantic-button" data-path="' + encodedPath + '">Transfer semantic edges</button>');
           return;
         }
 
         if (state === 'checking') {
-          actionsEl.innerHTML = '<span class="muted-action">checking…</span>';
+          setInner('<span class="muted-action">checking…</span>');
           return;
         }
 
         if (state === 'indexing') {
-          actionsEl.innerHTML = '<span class="muted-action">in progress…</span>';
+          setInner('<span class="muted-action">indexing…' + progressSuffix + '</span>');
           return;
         }
 
-        if (state === 'unchecked') {
-          actionsEl.innerHTML = '';
+        if (state === 'ingesting semantics') {
+          setInner('<span class="muted-action">ingesting semantics…' + progressSuffix + '</span>');
           return;
         }
 
-        if (state === 'idle') {
-          actionsEl.innerHTML =
-            '<button type="button" class="index-button" data-path="' + encodedPath + '">Index</button>' +
-            '<button type="button" class="semantic-button" data-path="' + encodedPath + '">Transfer semantic edges</button>';
+        if (state === 'unchecked' || state === 'idle') {
+          setInner('<button type="button" class="btn index-button" data-path="' + encodedPath + '">Add to Index</button>');
           return;
         }
 
-        actionsEl.innerHTML = '';
+        setInner('<span class="muted-action">—</span>');
       }
 
       function buildRow(project) {
@@ -407,14 +372,12 @@ export function buildCbmOverviewHtml({
         row.dataset.path = encodedPath;
         row.dataset.indexed = String(Boolean(project.indexed));
         row.dataset.state = initialState;
-        row.classList.toggle('active-row', false);
-        row.classList.toggle('indexing-row', false);
-        row.classList.toggle('ingesting-row', false);
+        row.classList.toggle('active-row', initialState === 'active');
+        row.classList.toggle('indexing-row', initialState === 'indexing');
+        row.classList.toggle('ingesting-row', initialState === 'ingesting semantics');
         row.innerHTML =
-          '<td>' + projectName + '</td>' +
-          '<td class="status"></td>' +
+          '<td class="name">' + projectName + '</td>' +
           '<td class="actions"></td>';
-        renderStatusCell(row.querySelector('.status'), initialState, null);
         renderActionsCell(row.querySelector('.actions'), projectName, projectPath, initialState);
         return row;
       }
@@ -435,8 +398,10 @@ export function buildCbmOverviewHtml({
               existingRow.dataset.state = nextState;
               existingRow.dataset.indexed = String(Boolean(project.indexed));
               const projectName = project.name || project.project || (project.root_path || '').split(/[\\/]/).filter(Boolean).pop() || 'project';
-              existingRow.firstChild.textContent = projectName;
-              renderStatusCell(existingRow.querySelector('.status'), nextState, null);
+              const nameCell = existingRow.querySelector('.name');
+              if (nameCell) {
+                nameCell.textContent = projectName;
+              }
               renderActionsCell(existingRow.querySelector('.actions'), projectName, projectPath, nextState);
               existingRows.delete(rowKey);
               return;
@@ -452,55 +417,11 @@ export function buildCbmOverviewHtml({
         tbody.innerHTML = '';
 
         if (projects.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="3">No projects available yet.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="2">No projects available yet.</td></tr>';
           return;
         }
 
         projects.forEach((project) => tbody.appendChild(buildRow(project)));
-        runSequentialProjectChecks();
-      }
-
-      function runSequentialProjectChecks() {
-        const rows = Array.from(document.querySelectorAll('tr[data-path]'));
-        if (rows.length === 0) {
-          return;
-        }
-
-        let currentIndex = 0;
-        const step = () => {
-          const row = rows[currentIndex];
-          if (!row) {
-            return;
-          }
-
-          const projectPath = decodeURIComponent(row.dataset.path || '');
-          const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : projectPath.split(/[\\/]/).filter(Boolean).pop() || 'project';
-          const finalState = row.dataset.indexed === 'true' ? 'active' : 'idle';
-
-          row.dataset.state = 'checking';
-          row.classList.toggle('active-row', false);
-          row.classList.toggle('indexing-row', false);
-          row.classList.toggle('ingesting-row', false);
-          renderStatusCell(row.querySelector('.status'), 'checking', null);
-          renderActionsCell(row.querySelector('.actions'), projectName, projectPath, 'checking');
-
-          setTimeout(() => {
-            row.dataset.state = finalState;
-            row.classList.toggle('active-row', finalState === 'active');
-            row.classList.toggle('indexing-row', false);
-            row.classList.toggle('ingesting-row', false);
-            row.dataset.indexed = String(finalState === 'active');
-            renderStatusCell(row.querySelector('.status'), finalState, null);
-            renderActionsCell(row.querySelector('.actions'), projectName, projectPath, finalState);
-
-            currentIndex += 1;
-            if (currentIndex < rows.length) {
-              setTimeout(step, 45);
-            }
-          }, 120);
-        };
-
-        setTimeout(step, 20);
       }
 
       async function refreshStatus() {
@@ -519,9 +440,8 @@ export function buildCbmOverviewHtml({
           row.classList.toggle('indexing-row', state === 'indexing');
           row.classList.toggle('ingesting-row', state === 'ingesting semantics');
           row.classList.toggle('indexed-row', state === 'active');
-          renderStatusCell(row.querySelector('.status'), state, progress);
           const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : projectPath.split(/[\\/]/).filter(Boolean).pop() || 'project';
-          renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state);
+          renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress);
         });
       }
 
@@ -529,9 +449,10 @@ export function buildCbmOverviewHtml({
         const button = event.target.closest('.index-button');
         if (button) {
           const row = button.closest('tr');
-          const statusEl = row && row.querySelector('.status');
-          if (statusEl) {
-            renderStatusCell(statusEl, 'Indexing Started', 0);
+          if (row) {
+            const projectPath = decodeURIComponent(row.dataset.path || '');
+            const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
+            renderActionsCell(row.querySelector('.actions'), projectName, projectPath, 'indexing', 0);
           }
           button.disabled = true;
           try {
@@ -564,8 +485,6 @@ export function buildCbmOverviewHtml({
               Object.entries(payload.jobs || {}).forEach(([path, job]) => {
                 const row = document.querySelector('tr[data-path="' + encodeURIComponent(path) + '"]');
                 if (!row) return;
-                const statusEl = row.querySelector('.status');
-                if (!statusEl) return;
 
                 const progress = job && typeof job.progress === 'number' ? job.progress : null;
                 const state = deriveProjectRowState({ indexed: row.dataset.indexed === 'true' }, job);
@@ -574,10 +493,9 @@ export function buildCbmOverviewHtml({
                 row.classList.toggle('indexing-row', state === 'indexing');
                 row.classList.toggle('ingesting-row', state === 'ingesting semantics');
                 row.classList.toggle('indexed-row', state === 'active');
-                renderStatusCell(statusEl, state, progress);
                 const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
                 const projectPath = decodeURIComponent(row.dataset.path || '');
-                renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state);
+                renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress);
               });
               return;
             }
@@ -585,8 +503,6 @@ export function buildCbmOverviewHtml({
             if (payload.type === 'update' && payload.repoPath) {
               const row = document.querySelector('tr[data-path="' + encodeURIComponent(payload.repoPath) + '"]');
               if (!row) return;
-              const statusEl = row.querySelector('.status');
-              if (!statusEl) return;
               const job = payload.job || {};
               const state = deriveProjectRowState({ indexed: row.dataset.indexed === 'true' }, job);
               row.dataset.state = state;
@@ -594,10 +510,9 @@ export function buildCbmOverviewHtml({
               row.classList.toggle('indexing-row', state === 'indexing');
               row.classList.toggle('ingesting-row', state === 'ingesting semantics');
               row.classList.toggle('indexed-row', state === 'active');
-              renderStatusCell(statusEl, state, job.progress ?? null);
               const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
               const projectPath = decodeURIComponent(row.dataset.path || '');
-              renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state);
+              renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, job.progress ?? null);
             }
           } catch (error) {
             console.warn('failed to parse progress update', error);

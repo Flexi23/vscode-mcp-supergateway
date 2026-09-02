@@ -30,12 +30,12 @@ graph LR
         end
 
         subgraph Docker["🐳 Docker Compose"]
-            Supergateway["Supergateway MCP Server"]
+            Supergateway["SuperGateway MCP Server"]
 
             Proxy@{ shape: subproc, label: "MSP Stack MCP Aggregate<br/>(admin UI :3100)" }
-            SemanticBridge["VS Code API bridge MCP<br/>code dependency resolver<br/>for C# / JS / MD / ..." ]
-            SupergatewayRpc["supergateway-rpc<br/>local tool endpoint<br/>(LM Studio + SiYuan)" ]
-            MCP@{ shape: processes, label: "Access Controlled Tools &<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
+            SemanticBridge["Semantic Bridge MCP<br/>call chain resolver for<br/>C# / TS / JS / Py / MD / ..." ]
+            SupergatewayRpc["Supergateway RPC<br/>local tool endpoint<br/>(LM Studio + SiYuan)" ]
+            MCP@{ shape: processes, label: "Access Controlled Tools &amp;<br/> Task Mgmt for Local Agents<br/>(MCP :8080)" }
 
             GitLab["GitLab MCP"]
             SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
@@ -48,8 +48,8 @@ graph LR
     SemanticBridge -. provide semantic edges .-> CodebaseMemory
     SupergatewayRpc -. exposes local tools .-> Proxy
     SupergatewayRpc --> |LM Studio / tool calls| LMStudioServer
-    SupergatewayRpc <-- |updates task docs| SiYuanNote
-    Supergateway --> |provider|MCP
+    SiYuanNote --> |updates task docs| SupergatewayRpc
+    Supergateway -->|provider| MCP
 
     MCP --> Copilot
     MCP --> LMStudioServer
@@ -167,7 +167,7 @@ Verify it came up:
 
 ```bash
 curl http://localhost:8080/ping     # -> ok
-docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
+docker compose logs gateway         # -> [upstream:*] connected (stdio) x6
 ```
 
 The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview, project indexing/status, and the graph UI through the same routed frontend. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and the legacy browser routes are no longer exposed.
@@ -201,8 +201,8 @@ All six upstreams run inside the `gateway` container; the runtime column only sa
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and exposes its graph through the same dashboard port `3100` while sharing `CBM_CACHE_DIR` with the UI process. |
-| `semantic-bridge` | local bridge | Node | Exposes both C# and TypeScript workspace/file enumeration plus dependency graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the container-local semantic bridge: the gateway aggregates a dedicated MCP tool surface for source indexing instead of reaching into the host editor directly. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and exposes its graph through the same dashboard port `3100` while sharing `CBM_CACHE_DIR` with the UI process (`CBM_UI_PORT`/`CBM_UI_BACKEND_PORT` are reserved for a future standalone UI but unused today). |
+| `semantic-bridge` | local bridge | Node | Exposes C#, TypeScript, and Python workspace/file enumeration plus dependency/call-chain graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the container-local semantic bridge: the gateway aggregates a dedicated MCP tool surface for source indexing instead of reaching into the host editor directly. |
 | `supergateway-rpc` | local bridge | Node | Exposes the LM Studio task tools (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`) via the same MSPStack gateway aggregation, instead of a standalone loopback port. It is the local RPC/tool endpoint that sits alongside `semantic-bridge` in the gateway runtime. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
 | `gitlab` | `@zereight/mcp-gitlab` | Node | Requires `GITLAB_PERSONAL_ACCESS_TOKEN` (see [Quick Start](#2-clone-and-configure)). |
@@ -224,8 +224,9 @@ The current implementation is intentionally language-aware but not C#-only:
 
 - `C#` / `.cs` and Razor `.razor` files are resolved through the Roslyn worker that runs inside the gateway container, so the dependency graph is built without depending on a host VS Code session.
 - `TypeScript` / `JavaScript` imports are parsed from `.ts`, `.tsx`, `.js`, and `.jsx` files using import/require patterns.
+- `Python` call chains are resolved by [`src/services/pythonCallChainResolver.ts`](src/services/pythonCallChainResolver.ts): it spawns the container's `python3` running an embedded script built on the stdlib `ast` module (the real Python parser), resolves intra-project imports, then walks each file's call expressions and resolves callees against per-file import bindings and a project-wide (unambiguous) symbol table — so the graph reflects actual function/method call relationships, not just imports.
 - Markdown links and component references are also recognized, so docs and frontend component trees can contribute graph edges.
-- Non-.NET source types rely on direct file parsing for relative imports and local references; no host-side editor API is required.
+- Non-.NET source types rely on direct file parsing (or, for Python, the stdlib `ast` parser) for relative imports, local references, and call resolution; no host-side editor API is required.
 
 The runtime integration is in [`src/gateway.ts`](src/gateway.ts): after `index_repository` succeeds, `enrichRepositorySemanticEdges()` calls the resolver, writes the generated edge list to a local JSON artifact, and then triggers `ingest_traces` against the project name in Codebase Memory.
 
@@ -233,7 +234,7 @@ This means the flow is:
 
 `index_repository` -> `extractEdges` -> `writeLinksFile` -> `ingest_traces`
 
-The MCP-facing entry point is [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts), which exposes both C# and TypeScript workspace tools over stdio for the gateway to aggregate like any other upstream. That keeps the semantic logic behind a typed MCP tool surface instead of reaching directly into the host editor from the container runtime.
+The MCP-facing entry point is [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts), which exposes C#, TypeScript, and Python workspace tools over stdio for the gateway to aggregate like any other upstream. That keeps the semantic logic behind a typed MCP tool surface instead of reaching directly into the host editor from the container runtime.
 
 ---
 
@@ -241,8 +242,8 @@ The MCP-facing entry point is [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp
 
 - **Unified Control Plane:** Connect Copilot and LM Studio simultaneously to your underlying toolchain (GitLab, Codebase Memory, SiYuan Note, MarkItDown).
 - **Sub-Agent Loopback:** Offload context aggregation, diff generation, and documentation updates to fast local models running in LM Studio without consuming cloud tokens.
-- **Semantic Edge Resolver:** Resolve cross-file dependencies from the active IDE semantics (C# and TypeScript/JavaScript first, with file-based fallbacks for the same code graph) and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
-- **Pattern: container-local semantic capabilities as MCP upstreams:** the gateway does not reach into a host editor directly. Instead, each source-analysis capability is wrapped in its own MCP stdio bridge (for example [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `csharp_extract_dependency_graph`, `typescript_extract_dependency_graph`, and friends). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making repository analysis available to all clients through the same MCP interface.
+- **Semantic Edge Resolver:** Resolve cross-file dependencies from the active IDE semantics (C#, TypeScript/JavaScript, and Python call chains first, with file-based fallbacks for the same code graph) and emit graph links for the codebase-memory indexer, so the 3D graph contains structural edges instead of only isolated file nodes.
+- **Pattern: container-local semantic capabilities as MCP upstreams:** the gateway does not reach into a host editor directly. Instead, each source-analysis capability is wrapped in its own MCP stdio bridge (for example [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts)), which exposes a narrow, typed tool surface (`csharp_list_workspace_files`, `csharp_extract_dependency_graph`, `typescript_extract_dependency_graph`, `python_extract_call_chain_graph`, and friends). The gateway then aggregates that bridge like any other upstream. This keeps the routing layer uniform while making repository analysis available to all clients through the same MCP interface.
 - **SiYuan Note Integration:** Read and edit notebooks, documents, content blocks, and native databases in a running SiYuan instance through the `siyuan-note` upstream.
 - **Document Conversion:** [MarkItDown](https://github.com/microsoft/markitdown) upstream exposes `convert_to_markdown(uri)`, turning PDFs, Office documents, images, and other files into Markdown for downstream agent consumption.
 
@@ -289,7 +290,7 @@ For the repo-local MCP help and markdown vault conventions, start at the vault p
 ### Current status: live gateway + semantic bridge
 - [x] Basic stdio / SSE transport routing.
 - [x] Multi-backend server orchestration for Codebase Memory, semantic bridge, GitLab, SiYuan Note, and MarkItDown.
-- [x] IDE-native semantic bridge exposing C# and TypeScript dependency graph tools via a dedicated MCP upstream.
+- [x] IDE-native semantic bridge exposing C#, TypeScript, and Python dependency/call-chain graph tools via a dedicated MCP upstream.
 - [x] Automatic stale-state reset for gateway and Codebase Memory runtime data before startup.
 - [x] Per-upstream startup log grouping and runtime tool discovery with the final tool catalog only emitted after the admin UI appears.
 
@@ -317,8 +318,8 @@ For the repo-local MCP help and markdown vault conventions, start at the vault p
 - [ ] Agent scope security layer (permission checks around destructive SiYuan operations).
 - [ ] Automated context bundle generator for Copilot prompts.
 
-### Design note: host-side semantic provider
-The semantic graph in this project is intentionally treated as a host-side capability, not as an in-container feature. VS Code and the installed language services own the Roslyn / Razor / JS/TS semantics, while the gateway remains the centralized routing layer. This keeps the architecture consistent: “feature provider” and “routing aggregator” are separate responsibilities, and each source of capability is exposed as its own MCP upstream. Markdown references are not a separate ecosystem; they are a semantic layer that links code and docs explicitly, so the graph can answer questions across implementation, UX, and documentation.
+### Design note: container-local semantic provider
+The semantic graph in this project is intentionally treated as a container-local capability, not a host-side one: the Roslyn C# resolver, the TypeScript compiler-API resolver, and the Python `ast`-based call-chain resolver all run inside the `gateway` container itself (spawning `dotnet`/using the bundled TypeScript package/spawning `python3` respectively), so none of them depend on a host VS Code session or its installed language services. The gateway remains the centralized routing layer, and each source-analysis capability is exposed as its own MCP upstream (`semantic-bridge`). This keeps the architecture consistent: “feature provider” and “routing aggregator” are separate responsibilities, but both live in the same container so the whole gateway stays self-contained. Markdown references are not a separate ecosystem; they are a semantic layer that links code and docs explicitly, so the graph can answer questions across implementation, UX, and documentation.
 
 ---
 
