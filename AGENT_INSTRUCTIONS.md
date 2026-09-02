@@ -5,9 +5,15 @@ You are an expert Senior Software Engineer AI, specialized in Node.js + TypeScri
 
 This repository is a Dockerized MCP gateway that aggregates multiple upstream MCP servers behind a single runtime: `codebase-memory`, `semantic-bridge`, `siyuan-note`, `gitlab`, and `markitdown`.
 
+## Purpose of this file
+This file is an agent-only operational reminder. It is not the canonical project documentation. The canonical source for user and developer guidance is the project README, and this instructions file exists to keep agents aligned with that source without letting the instructions drift away from the repo.
+
+Agents: read the relevant README section from disk before acting on repository rules, dependency updates, environment setup, runtime constraints, or workflow decisions. Do not treat this file as a substitute for the README. Treat this file as a compact reminder layer that explicitly points back to the canonical source.
+
 ## Maintenance Best Practices
 *   **Documentation Review:** Regularly generate and maintain an overview of all core files in a dedicated section (e.g., a 'Directory Structure' block) within the README to help new developers understand the project layout. This is not part of the standard workflow but must be maintained proactively.
 *   **Refactor hygiene:** A rename is not complete until the symbol name, file name, file path, imports, tests, and docs are reviewed together. Never leave a stale filename or import behind just because a symbol was updated. When a component or capability broadens in scope (for example, from a C#-only extractor to a multi-language semantic resolver), rename the file and update all references in the same change set.
+*   **Canonical source and drift prevention:** The README is the canonical project policy for users and developers. The AGENT_INSTRUCTIONS file is a reminder layer for agents, not a second source of truth. Before acting on repository rules, you must read the relevant README section again with a file read, then follow the README unless a higher-level workspace AGENT explicitly overrides it.
 
 ## Goals
 1.  **Accuracy and Correctness:** Ensure all generated code, documentation, and configuration files are logically correct, functional, and adhere to best practices.
@@ -20,6 +26,9 @@ This repository is a Dockerized MCP gateway that aggregates multiple upstream MC
 content.
 *   **Output Format:** When presenting code, use markdown code blocks with appropriate language tags. Provide clear explanations for all significant changes made.
 *   **Version Control:** All major changes must be reflected in the `CHANGELOG.md` using Semantic Versioning (SemVer).
+*   **Exact dependency pinning:** Direct dependencies in `package.json` must be pinned to exact versions (`1.2.3`), not version ranges (`^1.2.3`, `~1.2.3`, or other wildcards), unless a higher-level instruction explicitly allows a range for a special case. This is required to keep builds reproducible across machines and CI jobs.
+*   **Paired dependency alignment:** When a runtime package requires a companion type package or compatibility package (for example `ws` and `@types/ws`), both must be updated and kept in sync in the same change set, and both must remain pinned to exact compatible versions.
+*   **README as canonical project instruction:** The repository README is the canonical project operating guidance for users and developers. Agents must re-read the relevant README section before acting on dependency updates, environment setup, or runtime policy, and must follow the README unless a higher-level workspace AGENT explicitly overrides it. Do not rely on memory or a stale summary when the README is the authoritative source.
 
 ## Workflow
 When a user requests a task:
@@ -39,7 +48,7 @@ When a user requests a task:
 
 ### Port mapping source of truth: `.env` only
 *   **Hard rule:** every published port and every internal port value must be defined once in the active `.env` file and referenced from `docker-compose.yml` only as `${VAR}`.
-*   **Forbidden:** numeric port literals in Compose files, code, docs, or scripts when they are part of the runtime mapping (`8080`, `8081`, `3100`, `3110`, `6806`, `9749`, etc.).
+*   **Forbidden:** numeric port literals in Compose files, code, docs, or scripts when they are part of the runtime mapping (`8080`, `8081`, `3100`, `3110`, `6806`, etc.).
 *   **Single source of truth:** if a port is changed, the `.env` entry changes once, and every compose mapping/consumer reads that same value.
 *   **Why:** hardcoded port numbers create duplicate truths, break environment parity, and hide missing or stale config values behind silent defaults.
 

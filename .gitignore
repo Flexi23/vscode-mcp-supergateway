@@ -1,6 +1,13 @@
 dist/
 node_modules/
-vault/
 siyuan-workspace/
 gateway-data/
 .env
+
+# The markdown vault is intentionally versioned inside the repo so the local MCP
+# tools and help docs stay available to the project and remain inspectable in git.
+!vault/
+!vault/**
+# Generated runtime state from the markdown-vault tooling must stay local and out
+# of version control even though the project help files themselves are tracked.
+vault/.markdown_vault_mcp/

@@ -16,7 +16,7 @@ As MCP usage grows, managing multiple disjointed MCP servers across different cl
 
 ## 🏗 Architecture
 
-Everything except your IDE and LM Studio runs inside Docker — the containers bring their own Node.js, Python, and the current set of five upstream MCP servers.
+Everything except your IDE and LM Studio runs inside Docker — the containers bring their own Node.js, Python, and the current set of six upstream MCP servers.
 
 ```mermaid
 graph LR
@@ -39,7 +39,7 @@ graph LR
 
             GitLab["GitLab MCP"]
             SiYuanNote["SiYuan Note MCP<br/>(Markdown Vault UI :6806)"]
-            CodebaseMemory["Codebase Memory MCP<br>(3D graph/admin UI :9749)"]
+            CodebaseMemory["Codebase Memory MCP<br>(graph routed through dashboard :3100)"]
             MarkItDown["MarkItDown MCP<br/>(docs/Office/PDF to Markdown)"]
         end
     end
@@ -94,6 +94,16 @@ Legend: 🟦 blue = this repo's code entry points (click to open the source file
 
 ---
 
+## 🧭 Canonical project policy
+
+This README is the canonical project-facing reference for users and developers. It describes the supported runtime, environment files, dependency policy, and operational conventions for this repository.
+
+The local agent instructions file in this repo is a reminder layer for AI tools and contributors. It exists to keep agents aligned with the project rules, but it is not a second source of truth. When a task touches project policy, dependency pinning, environment setup, or operational conventions, the agent must re-read the relevant README section and use it as the authoritative source.
+
+For reproducibility, direct dependency versions in [`package.json`](package.json) must be pinned to exact versions instead of ranges, and paired packages such as `ws` and `@types/ws` must stay in sync in the same change. This prevents silent drift between developer machines, CI, and the runtime image.
+
+---
+
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
@@ -128,6 +138,7 @@ Then edit [`.env`](.env.example):
 | `CBM_DEFAULT_PATH` | **required** | Linux container path that Codebase Memory opens by default in its UI. Keep this as `/workspace` so the UI sees the same root that the bind mount exposes. |
 | `CBM_HOST_CACHE_DIR` | **required** | Absolute host path for the bind mount that Codebase Memory uses as its writable cache; it is mounted into the `gateway` container at `/root/cbm-cache`. The internal runtime variable inside the container remains `CBM_CACHE_DIR`. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
+| `MARKDOWN_VAULT_ROOT` | **required** for repo-local help docs | Absolute path to the git-tracked markdown vault root, for example `C:\gitlab.uni-rostock.de\limati-inf\vscode-mcp-supergateway\vault`. This keeps the online help and local notes inside the project so the integrated MCP tools can read and update them without leaving the repository. |
 
 ### 3. Start
 
@@ -159,7 +170,7 @@ curl http://localhost:8080/ping     # -> ok
 docker compose logs gateway         # -> [upstream:*] connected (stdio) x4
 ```
 
-The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview for project indexing/status; the direct Codebase Memory graph remains on `9749` and is opened in a new browser tab instead of being embedded. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and the legacy browser routes are no longer exposed.
+The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview, project indexing/status, and the graph UI through the same routed frontend. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and the legacy browser routes are no longer exposed.
 
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
@@ -172,8 +183,7 @@ The local dashboard lives at <http://localhost:3100/> and exposes the Codebase M
 | Port | What it is |
 |---|---|
 | `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. SSE/MCP traffic only; the dashboard is not served here. |
-| `3100` | Local dashboard overview for Codebase Memory project indexing/status; no legacy browser routes are exposed. |
-| `9749` | `codebase-memory-mcp`'s direct 3D graph-visualization UI (<http://localhost:9749>). The graph is opened in a new browser tab and is not embedded behind the dashboard. |
+| `3100` | Local dashboard overview for Codebase Memory project indexing/status, including the routed graph UI. The CBM interface is served through the web frontend instead of a separate public port. |
 
 The LM Studio loopback's `lmstudio_update_siyuan_task` tool reads/writes SiYuan documents directly via `SiyuanClient` (`src/services/siyuanClient.ts`), the same backend the `siyuan-note` upstream talks to (see [Configured Upstreams](#-configured-upstreams)).
 
@@ -181,17 +191,17 @@ The LM Studio loopback's `lmstudio_update_siyuan_task` tool reads/writes SiYuan 
 
 [`@mspstack/mcp-gateway`](https://www.npmjs.com/package/@mspstack/mcp-gateway) ("MSPStack Gateway", MIT-licensed, by [Eugene Samotija](https://github.com/selic)) is a third-party, self-hosted MCP aggregator: it federates any number of MCP servers (stdio or HTTP) behind one endpoint with namespaced tools, and normally adds OAuth 2.1 / static-token auth, role-based tool access, and secret-store integration (OpenBao, Azure Key Vault) on top — built for MSPs running many client-facing MCP servers.
 
-`src/gateway.ts` spawns it via `npx -y @mspstack/mcp-gateway --port <admin-port> --config <admin-config> --db-path <db>` and sets `DEV_ALLOW_UNAUTHENTICATED=true`, which puts it in its documented localhost-only, no-auth mode — we only use its core aggregation feature (one MCP endpoint for our four stdio upstreams), none of the OAuth/RBAC/secret-store machinery. `DEV_ALLOW_UNAUTHENTICATED=true` must **never** be used on anything but `127.0.0.1`/localhost; the package itself refuses to start without it or a real auth method configured. Requires Node ≥24 (uses the built-in `node:sqlite`, no native dependencies) — see the Node version note below.
+`src/gateway.ts` spawns it via `npx -y @mspstack/mcp-gateway --port <admin-port> --config <admin-config> --db-path <db>` and sets `DEV_ALLOW_UNAUTHENTICATED=true`, which puts it in its documented localhost-only, no-auth mode — we use its core aggregation feature to expose one MCP endpoint for our six stdio upstreams, without the OAuth/RBAC/secret-store machinery. `DEV_ALLOW_UNAUTHENTICATED=true` must **never** be used on anything but `127.0.0.1`/localhost; the package itself refuses to start without it or a real auth method configured. Requires Node ≥24 (uses the built-in `node:sqlite`, no native dependencies) — see the Node version note below.
 
 ---
 
 ## 🔌 Configured Upstreams
 
-All five upstreams run inside the `gateway` container; the runtime column only says which language runtime the image provides for them.
+All six upstreams run inside the `gateway` container; the runtime column only says which language runtime the image provides for them.
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), and opens `CBM_DEFAULT_PATH` in its UI; own graph UI on port 9749 (see [Services & Ports](#-services--ports)), shared `CBM_CACHE_DIR` with the UI process. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and exposes its graph through the same dashboard port `3100` while sharing `CBM_CACHE_DIR` with the UI process. |
 | `semantic-bridge` | local bridge | Node | Exposes both C# and TypeScript workspace/file enumeration plus dependency graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the container-local semantic bridge: the gateway aggregates a dedicated MCP tool surface for source indexing instead of reaching into the host editor directly. |
 | `supergateway-rpc` | local bridge | Node | Exposes the LM Studio task tools (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`) via the same MSPStack gateway aggregation, instead of a standalone loopback port. It is the local RPC/tool endpoint that sits alongside `semantic-bridge` in the gateway runtime. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
@@ -257,6 +267,8 @@ Notes:
 
 Only relevant if you change the TypeScript sources. The image compiles `src/` itself during `docker compose build`, so you never need a host-side build to *run* anything — a local install is purely for editor IntelliSense and fast type-check feedback:
 
+For reproducibility, keep all direct dependency versions pinned to exact values in `package.json`; avoid caret ranges for runtime and transport packages because they can silently drift across machines and CI jobs. When a package ships a companion type package (`ws` + `@types/ws`), update the pair together and keep the exact version set in sync.
+
 ```bash
 npm install          # type definitions for your editor
 npx tsc --noEmit     # type-check without producing dist/
@@ -267,6 +279,8 @@ Then rebuild the image to pick up your changes:
 ```bash
 docker compose up -d --build
 ```
+
+For the repo-local MCP help and markdown vault conventions, start at the vault policy in [vault/meta/vault-policy.md](vault/meta/vault-policy.md). It defines the canonical directory semantics, the `MARKDOWN_VAULT_ROOT` expectation, and the distinction between tracked project help and generated local cache files.
 
 ---
 
@@ -299,6 +313,7 @@ docker compose up -d --build
 
 ### Phase 5: SiYuan Note & Task Management Enhancements
 - [x] Structured task/ADR documents in SiYuan, driven by the `siyuan-note` upstream and `lmstudio_update_siyuan_task`.
+- [ ] Define and maintain the repo-local vault policy and directory structure (`meta/`, `help/`, `notes/`, `templates/`, `ops/`, `archive/`) so local MCP tooling has a stable, Git-visible, project-scoped knowledge base and entry point.
 - [ ] Agent scope security layer (permission checks around destructive SiYuan operations).
 - [ ] Automated context bundle generator for Copilot prompts.
 
