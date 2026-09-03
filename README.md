@@ -170,7 +170,7 @@ curl http://localhost:8080/ping     # -> ok
 docker compose logs gateway         # -> [upstream:*] connected (stdio) x6
 ```
 
-The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview and project indexing/status. The graph UI itself is served through the internal `CBM_UI_PORT` (for example `3101`), and routed at `/cbm/graph` without wrapping the dashboard shell. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and legacy browser routes are no longer exposed.
+The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview and project indexing/status. The graph UI itself is served on the upstream default internal port `9749`, and routed at `/cbm/graph` without wrapping the dashboard shell. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and legacy browser routes are no longer exposed.
 
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
@@ -184,7 +184,7 @@ The local dashboard lives at <http://localhost:3100/> and exposes the Codebase M
 |---|---|
 | `8080` | Public MCP endpoint — the forward proxy your MCP client (Copilot/LM Studio) connects to. SSE/MCP traffic only; the dashboard is not served here. |
 | `3100` | Local dashboard overview for Codebase Memory project indexing/status. |
-| `3101` | Internal Codebase Memory graph UI port. The dashboard proxies `/cbm/graph` to this port so the upstream graph page is shown without the dashboard shell. |
+| `9749` | Fixed internal Codebase Memory graph UI port (upstream default). The dashboard proxies `/cbm/graph` to this container-local port so the upstream graph page is shown without the dashboard shell. |
 
 The LM Studio loopback's `lmstudio_update_siyuan_task` tool reads/writes SiYuan documents directly via `SiyuanClient` (`src/services/siyuanClient.ts`), the same backend the `siyuan-note` upstream talks to (see [Configured Upstreams](#-configured-upstreams)).
 
@@ -202,7 +202,7 @@ All six upstreams run inside the `gateway` container; the runtime column only sa
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and serves its graph UI on the separate internal `CBM_UI_PORT` while sharing `CBM_CACHE_DIR` with the routed dashboard process. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and serves its graph UI on the upstream default internal container port `9749` while sharing `CBM_CACHE_DIR` with the routed dashboard process. |
 | `semantic-bridge` | local bridge | Node | Exposes C#, TypeScript, and Python workspace/file enumeration plus dependency/call-chain graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the container-local semantic bridge: the gateway aggregates a dedicated MCP tool surface for source indexing instead of reaching into the host editor directly. |
 | `supergateway-rpc` | local bridge | Node | Exposes the LM Studio task tools (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`) via the same MSPStack gateway aggregation, instead of a standalone loopback port. It is the local RPC/tool endpoint that sits alongside `semantic-bridge` in the gateway runtime. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
@@ -214,6 +214,8 @@ Upstream wiring lives in [`docker/gateway.config.json`](docker/gateway.config.js
 ### Semantic Dependency Resolver
 
 The semantic edge resolution strategy dispatcher lives in [`src/services/semanticEdgeResolutionStrategyDispatcher.ts`](src/services/semanticEdgeResolutionStrategyDispatcher.ts). It is the bridge that turns a repository into graph edges for Codebase Memory instead of leaving each project as an isolated node.
+
+> Important: the Roslyn-based resolver tests in [`resolver.test.mjs`](resolver.test.mjs) are intentionally designed to run only inside the project container. They assume the Linux runtime layout used by the gateway image (`DOTNET_ROOT=/usr/share/dotnet`, the container-side .NET SDK, and the bind-mounted workspace root), not a host machine installation. A host-side `ENOENT` for `/usr/share/dotnet/dotnet` is therefore not a valid signal for a container-runtime bug; the test is meant to validate the container execution path only.
 
 It does three things in sequence:
 

@@ -5,6 +5,8 @@ import type { GraphLink, GraphUri } from './semanticEdgeResolutionStrategyDispat
 import { ResolverStrategy, ResolverStrategyType } from './resolverStrategy';
 
 export class TypeScriptDependencyResolver extends ResolverStrategy {
+  static readonly tsResultCache = new Map<string, { fingerprint: string; links: GraphLink[] }>();
+
   readonly type = ResolverStrategyType.TypeScript;
   readonly label = 'TypeScriptDependencyResolver (TypeScript compiler strategy)';
   protected readonly supportedExtensions = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.mts', '.cts'];
@@ -72,9 +74,9 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
       return [];
     }
 
-    const compilerLinks = this.extractLinksFromTypeScriptCompiler(rootDir, files);
+    const compilerLinks = this.extractLinksFromTypeScriptCompiler(rootDir, files, onProgress);
     if (compilerLinks.length > 0) {
-      console.log(`[TypeScriptDependencyResolver] compiler strategy resolved ${compilerLinks.length} TypeScript graph links.`);
+      console.log(`[TypeScript] ${rootDir}: ${compilerLinks.length} link(s) resolved from TypeScript compiler graph.`);
       return compilerLinks;
     }
 
@@ -98,7 +100,7 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
     return Array.from(links.values());
   }
 
-  private extractLinksFromTypeScriptCompiler(rootDir: string, files: GraphUri[]): GraphLink[] {
+  private extractLinksFromTypeScriptCompiler(rootDir: string, files: GraphUri[], onProgress?: (message: string, percent: number, processed: number, total: number) => void): GraphLink[] {
     const sourceFiles = files
       .map((file) => file.fsPath)
       .filter((filePath) => !filePath.endsWith('.d.ts'));
@@ -107,42 +109,84 @@ export class TypeScriptDependencyResolver extends ResolverStrategy {
       return [];
     }
 
-    const compilerOptions = this.getCompilerOptions(rootDir);
-    const program = ts.createProgram(sourceFiles, compilerOptions, ts.createCompilerHost(compilerOptions, true));
-    const links = new Map<string, GraphLink>();
+    const fingerprint = this.computeFingerprint(sourceFiles, rootDir);
+    const cacheKey = `${rootDir}\u0000${fingerprint}`;
+    const cached = TypeScriptDependencyResolver.tsResultCache.get(cacheKey);
+    if (cached) {
+      onProgress?.(`[TypeScriptDependencyResolver] reusing cached TypeScript graph for ${sourceFiles.length} file(s)`, 100, sourceFiles.length, Math.max(sourceFiles.length, 1));
+      return cached.links;
+    }
 
-    for (const sourceFile of program.getSourceFiles()) {
-      if (sourceFile.isDeclarationFile || !this.isSupportedTypeScriptFile(sourceFile.fileName)) {
-        continue;
-      }
+    try {
+      const compilerOptions = this.getCompilerOptions(rootDir);
+      const program = ts.createProgram(sourceFiles, compilerOptions, ts.createCompilerHost(compilerOptions, true));
+      const links = new Map<string, GraphLink>();
 
-      const source = this.toGraphPath(sourceFile.fileName, rootDir);
-      if (!source || source === '.') {
-        continue;
-      }
+      for (const sourceFile of program.getSourceFiles()) {
+        if (sourceFile.isDeclarationFile || !this.isSupportedTypeScriptFile(sourceFile.fileName)) {
+          continue;
+        }
 
-      for (const statement of sourceFile.statements) {
-        const moduleSpecifiers = this.collectModuleSpecifiers(statement);
-        for (const moduleSpecifier of moduleSpecifiers) {
-          const resolved = this.resolveModuleSpecifier(sourceFile, moduleSpecifier, compilerOptions);
-          if (!resolved) {
-            continue;
-          }
+        const source = this.toGraphPath(sourceFile.fileName, rootDir);
+        if (!source || source === '.') {
+          continue;
+        }
 
-          const target = this.toGraphPath(resolved, rootDir);
-          if (!target || source === target) {
-            continue;
-          }
+        for (const statement of sourceFile.statements) {
+          const moduleSpecifiers = this.collectModuleSpecifiers(statement);
+          for (const moduleSpecifier of moduleSpecifiers) {
+            const resolved = this.resolveModuleSpecifier(sourceFile, moduleSpecifier, compilerOptions);
+            if (!resolved) {
+              continue;
+            }
 
-          const key = `${source}\u0000${target}\u0000file-reference`;
-          if (!links.has(key)) {
-            links.set(key, { source, target, weight: 1, edgeType: 'file-reference' });
+            const target = this.toGraphPath(resolved, rootDir);
+            if (!target || source === target) {
+              continue;
+            }
+
+            const key = `${source}\u0000${target}\u0000file-reference`;
+            if (!links.has(key)) {
+              links.set(key, { source, target, weight: 1, edgeType: 'file-reference' });
+            }
           }
         }
       }
+
+      const resolvedLinks = Array.from(links.values());
+      TypeScriptDependencyResolver.tsResultCache.set(cacheKey, { fingerprint, links: resolvedLinks });
+      return resolvedLinks;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[TypeScriptDependencyResolver] TypeScript compiler resolution failed; continuing without cached graph: ${message}`);
+      return [];
+    }
+  }
+
+  private computeFingerprint(files: readonly string[], rootDir: string): string {
+    const entries = files
+      .slice()
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map((file) => {
+        try {
+          const stat = fs.statSync(file);
+          return `${file}:${stat.size}:${Number(stat.mtimeMs.toFixed(0))}`;
+        } catch {
+          return `${file}:0:0`;
+        }
+      });
+
+    const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists, 'tsconfig.json');
+    if (configPath) {
+      try {
+        const stat = fs.statSync(configPath);
+        entries.push(`${configPath}:${stat.size}:${Number(stat.mtimeMs.toFixed(0))}`);
+      } catch {
+        entries.push(`${configPath}:0:0`);
+      }
     }
 
-    return Array.from(links.values());
+    return entries.join(';');
   }
 
   private getCompilerOptions(rootDir: string): ts.CompilerOptions {

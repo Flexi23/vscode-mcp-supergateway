@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { createDotNetRoslynRunner, listDotNetEntrypointFiles } from './dotnetRoslynProgram';
 import { ResolverStrategy, ResolverStrategyType } from './resolverStrategy';
 
 export interface GraphLink {
@@ -12,6 +12,9 @@ export interface GraphLink {
 }
 
 export class DotNetDependencyResolver extends ResolverStrategy {
+  static readonly roslynResultCache = new Map<string, { fingerprint: string; links: GraphLink[] }>();
+  static readonly roslynProjectCache = new Map<string, { projectDir: string; projectFile: string; programFile: string; dotnetExecutable: string; entryPointFile: string }>();
+
   readonly type = ResolverStrategyType.DotNet;
   readonly label = 'DotNetDependencyResolver (Roslyn .NET strategy)';
   protected readonly supportedExtensions = ['.cs', '.razor'];
@@ -91,64 +94,6 @@ export class DotNetDependencyResolver extends ResolverStrategy {
     return result.sort();
   }
 
-  private resolveDotNetExecutable(): string {
-    const executableName = process.platform === 'win32' ? 'dotnet.exe' : 'dotnet';
-    const standardRoots = process.platform === 'win32'
-      ? [
-          process.env.DOTNET_ROOT,
-          process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'dotnet'),
-          process.env['ProgramFiles(x86)'] && path.join(process.env['ProgramFiles(x86)'], 'dotnet'),
-          'C:\\Program Files\\dotnet',
-          'C:\\Program Files (x86)\\dotnet',
-        ]
-      : [
-          process.env.DOTNET_ROOT,
-          '/usr/share/dotnet',
-          '/usr/local/share/dotnet',
-          path.join(os.homedir(), '.dotnet'),
-        ];
-
-    const explicitRoots = standardRoots.filter((value): value is string => Boolean(value));
-    const pathRoots = (process.env.PATH ?? '')
-      .split(path.delimiter)
-      .map((value) => value.trim())
-      .filter(Boolean);
-
-    for (const root of [...explicitRoots, ...pathRoots]) {
-      const candidates = [
-        path.join(root, executableName),
-        path.join(root, process.platform === 'win32' ? 'dotnet.exe' : 'dotnet'),
-      ];
-
-      for (const candidate of candidates) {
-        if (fs.existsSync(candidate)) {
-          return candidate;
-        }
-      }
-    }
-
-    if (process.env.PATH) {
-      const lookup = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['dotnet'], {
-        encoding: 'utf8',
-        env: process.env,
-        shell: false,
-      });
-
-      const firstMatch = typeof lookup.stdout === 'string'
-        ? lookup.stdout
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .find((line) => line.length > 0)
-        : undefined;
-
-      if (firstMatch) {
-        return firstMatch;
-      }
-    }
-
-    return executableName;
-  }
-
   private resolveWithRoslyn(
     rootDir: string,
     files: string[],
@@ -159,227 +104,131 @@ export class DotNetDependencyResolver extends ResolverStrategy {
       return [];
     }
 
-    try {
-      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-dependency-resolver-'));
-      const projectDir = path.join(tempRoot, 'resolver');
-      fs.mkdirSync(projectDir, { recursive: true });
+    const entryPointFiles = listDotNetEntrypointFiles(rootDir);
+    const resolverEntryPoints = entryPointFiles.length > 0 ? entryPointFiles : [path.join(rootDir, 'DotNetDependencyResolver.csproj')];
+    console.info(`[DotNet] discovered ${csFiles.length} C# file(s) and ${resolverEntryPoints.length} entrypoint candidate(s) for ${rootDir}`);
+    const mergedLinks = new Map<string, GraphLink>();
 
-      const projectFile = path.join(projectDir, 'DotNetDependencyResolver.csproj');
-      const programFile = path.join(projectDir, 'Program.cs');
-
-      const projectXml = `
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-  </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.13.0" />
-  </ItemGroup>
-</Project>
-`.trim();
-
-      const programCode = String.raw`
-using System.Text.Json;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-
-var rootDir = string.Empty;
-for (var i = 0; i < args.Length; i++)
-{
-    if (args[i] == "--root" && i + 1 < args.Length)
-    {
-        rootDir = args[i + 1];
-        break;
-    }
-}
-
-if (string.IsNullOrWhiteSpace(rootDir) || !Directory.Exists(rootDir))
-{
-    Console.WriteLine("{\"links\": []}");
-    return;
-}
-
-var files = Directory.EnumerateFiles(rootDir, "*.*", SearchOption.AllDirectories)
-    .Where(file => file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("/bin/", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("/obj/", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("/node_modules/", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase))
-    .Where(file => !file.Contains("\\node_modules\\", StringComparison.OrdinalIgnoreCase))
-    .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
-    .ToList();
-
-if (files.Count == 0)
-{
-    Console.WriteLine("{\"links\": []}");
-    return;
-}
-
-var trustedAssemblies = ((string?)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES"))
-    ?? string.Empty;
-var metadataReferences = trustedAssemblies
-    .Split(Path.PathSeparator)
-    .Where(path => !string.IsNullOrWhiteSpace(path))
-    .Select(path => MetadataReference.CreateFromFile(path))
-    .ToList();
-
-var syntaxTrees = files.Select(file => CSharpSyntaxTree.ParseText(File.ReadAllText(file), path: file)).ToList();
-var compilation = CSharpCompilation.Create(
-    assemblyName: "dotnet-dependency-resolver",
-    syntaxTrees: syntaxTrees,
-    references: metadataReferences,
-    options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-var linksByKey = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-foreach (var tree in syntaxTrees)
-{
-    var currentFile = tree.FilePath;
-    if (string.IsNullOrWhiteSpace(currentFile))
-    {
+    for (const [index, entryPointFile] of resolverEntryPoints.entries()) {
+      const relativeEntryPoint = path.relative(rootDir, entryPointFile) || path.basename(entryPointFile);
+      const fingerprint = this.computeFingerprint([...csFiles, entryPointFile]);
+      const cacheKey = `${rootDir}\u0000${entryPointFile}\u0000${fingerprint}`;
+      const cached = DotNetDependencyResolver.roslynResultCache.get(cacheKey);
+      if (cached) {
+        onProgress?.(`[DotNetDependencyResolver] reusing cached Roslyn graph for ${csFiles.length} C# file(s) (${path.basename(entryPointFile)})`, 100, csFiles.length, Math.max(csFiles.length, 1));
+        for (const link of cached.links) {
+          const dedupeKey = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
+          if (!mergedLinks.has(dedupeKey)) {
+            mergedLinks.set(dedupeKey, link);
+          }
+        }
         continue;
+      }
+
+      try {
+        const runner = this.getOrCreateRoslynRunner(rootDir, entryPointFile);
+        console.info(`[DotNet] starting Roslyn compile for entrypoint ${relativeEntryPoint} (${index + 1}/${resolverEntryPoints.length}); using ${path.basename(runner.projectFile)}; dotnet=${runner.dotnetExecutable}`);
+        onProgress?.(`[DotNet] ${relativeEntryPoint}: building graph for ${csFiles.length} C# file(s)`, 5, 0, Math.max(csFiles.length, 1));
+
+        const command = ['run', '--project', runner.projectFile, '--', '--root', rootDir, '--entrypoint', runner.entryPointFile];
+        console.info(`[DotNet] invoking ${path.basename(runner.dotnetExecutable)} ${command.join(' ')}`);
+
+        const result = spawnSync(runner.dotnetExecutable, command, {
+          encoding: 'utf8',
+          cwd: runner.projectDir,
+          env: {
+            ...process.env,
+            DOTNET_ROOT: path.dirname(runner.dotnetExecutable),
+            PATH: [path.dirname(runner.dotnetExecutable), process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+          },
+          maxBuffer: 100 * 1024 * 1024,
+        });
+
+        const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : String(result.stderr ?? '').trim();
+        const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : String(result.stdout ?? '').trim();
+
+        if (result.error) {
+          const errorMessage = result.error instanceof Error ? result.error.message : String(result.error);
+          const details = [
+            `spawn: ${errorMessage}`,
+            stderr ? `stderr: ${stderr}` : undefined,
+            stdout ? `stdout: ${stdout}` : undefined,
+          ].filter(Boolean).join(' | ');
+
+          console.warn(`[DotNet] ${path.relative(rootDir, entryPointFile) || path.basename(entryPointFile)}: failed to start (${details || 'dotnet could not be started'})`);
+          continue;
+        }
+
+        if (result.status !== 0) {
+          const details = [
+            `exitCode: ${result.status}`,
+            stderr ? `stderr: ${stderr}` : undefined,
+            stdout ? `stdout: ${stdout}` : undefined,
+          ].filter(Boolean).join(' | ');
+
+          console.warn(`[DotNet] ${path.relative(rootDir, entryPointFile) || path.basename(entryPointFile)}: failed (exit ${result.status}) ${details || 'dotnet exited with a non-zero status'}`);
+          continue;
+        }
+
+        if (!stdout) {
+          console.warn(`[DotNet] ${relativeEntryPoint}: no stdout from Roslyn worker; stderr=${stderr || '(empty)'}`);
+          continue;
+        }
+
+        console.info(`[DotNet] Roslyn worker for ${relativeEntryPoint} finished with ${stdout.length} bytes of output`);
+
+        const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number; edgeType?: string }> };
+        const links = Array.isArray(payload.links) ? payload.links.map((entry) => ({
+          source: entry.source,
+          target: entry.target,
+          weight: Math.max(1, entry.weight ?? 1),
+          edgeType: entry.edgeType || 'file-reference',
+        })) : [];
+
+        DotNetDependencyResolver.roslynResultCache.set(cacheKey, { fingerprint, links });
+        onProgress?.(`[DotNet] ${path.relative(rootDir, entryPointFile) || path.basename(entryPointFile)}: ${links.length} edge(s) ready`, 100, csFiles.length, Math.max(csFiles.length, 1));
+
+        for (const link of links) {
+          const dedupeKey = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
+          if (!mergedLinks.has(dedupeKey)) {
+            mergedLinks.set(dedupeKey, link);
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[DotNet] ${rootDir}: Roslyn resolution skipped (${message})`);
+      }
     }
 
-    var model = compilation.GetSemanticModel(tree);
-    var nodes = tree.GetRoot().DescendantNodes();
+    return this.dedupeLinks(Array.from(mergedLinks.values()));
+  }
 
-    foreach (var node in nodes)
-    {
-        var symbol = node switch
-        {
-            IdentifierNameSyntax identifier => model.GetSymbolInfo(identifier).Symbol ?? model.GetTypeInfo(identifier).Type ?? model.GetTypeInfo(identifier).ConvertedType,
-            GenericNameSyntax generic => model.GetSymbolInfo(generic).Symbol ?? model.GetTypeInfo(generic).Type ?? model.GetTypeInfo(generic).ConvertedType,
-            QualifiedNameSyntax qualified => model.GetSymbolInfo(qualified).Symbol ?? model.GetTypeInfo(qualified).Type ?? model.GetTypeInfo(qualified).ConvertedType,
-            MemberAccessExpressionSyntax memberAccess => model.GetSymbolInfo(memberAccess).Symbol ?? model.GetTypeInfo(memberAccess).Type ?? model.GetTypeInfo(memberAccess).ConvertedType,
-            _ => null
-        };
-
-        if (symbol is null)
-        {
-            continue;
-        }
-
-        if (symbol is INamespaceSymbol or IAssemblySymbol or ILocalSymbol or IParameterSymbol or IRangeVariableSymbol or ITypeParameterSymbol or IAliasSymbol)
-        {
-            continue;
-        }
-
-        if (symbol.ContainingAssembly != null && symbol.ContainingAssembly.Name != null && symbol.ContainingAssembly.Name.StartsWith("System", StringComparison.Ordinal))
-        {
-            continue;
-        }
-
-        var targetFile = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree.FilePath;
-        if (string.IsNullOrWhiteSpace(targetFile) || string.Equals(targetFile, currentFile, StringComparison.OrdinalIgnoreCase))
-        {
-            continue;
-        }
-
-        var sourcePath = Path.GetRelativePath(rootDir, currentFile).Replace('\\', '/');
-        var targetPath = Path.GetRelativePath(rootDir, targetFile).Replace('\\', '/');
-
-        if (string.Equals(sourcePath, targetPath, StringComparison.OrdinalIgnoreCase))
-        {
-            continue;
-        }
-
-        var key = sourcePath + "\u0000" + targetPath + "\u0000file-reference";
-        if (!linksByKey.ContainsKey(key))
-        {
-            linksByKey[key] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        linksByKey[key].Add(targetPath);
+  private getOrCreateRoslynRunner(rootDir: string, entryPointFile?: string): { projectDir: string; projectFile: string; programFile: string; dotnetExecutable: string; entryPointFile: string } {
+    const cacheKey = `${rootDir}\u0000${entryPointFile || ''}`;
+    const existing = DotNetDependencyResolver.roslynProjectCache.get(cacheKey);
+    if (existing) {
+      return existing;
     }
-}
 
-var links = linksByKey
-    .Select(pair => new
-    {
-        source = pair.Key.Split("\u0000", 3)[0],
-        target = pair.Key.Split("\u0000", 3)[1],
-        edgeType = pair.Key.Split("\u0000", 3)[2],
-        weight = Math.Max(1, pair.Value.Count)
-    })
-    .OrderBy(link => link.source, StringComparer.OrdinalIgnoreCase)
-    .ThenBy(link => link.target, StringComparer.OrdinalIgnoreCase)
-    .ToList();
+    const runner = createDotNetRoslynRunner(rootDir, entryPointFile);
+    DotNetDependencyResolver.roslynProjectCache.set(cacheKey, runner);
+    return runner;
+  }
 
-Console.WriteLine(JsonSerializer.Serialize(new { links }));
-`.trim();
-
-      fs.writeFileSync(projectFile, projectXml, 'utf8');
-      fs.writeFileSync(programFile, programCode, 'utf8');
-
-      onProgress?.(`[DotNetDependencyResolver] building Roslyn graph for ${csFiles.length} C# file(s)`, 5, 0, Math.max(csFiles.length, 1));
-
-      const dotnetExecutable = this.resolveDotNetExecutable();
-      const dotnetRoot = path.dirname(dotnetExecutable);
-      const childEnv = {
-        ...process.env,
-        DOTNET_ROOT: dotnetRoot,
-        PATH: [dotnetRoot, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-      };
-
-      const result = spawnSync(dotnetExecutable, ['run', '--project', projectFile, '--', '--root', rootDir], {
-        encoding: 'utf8',
-        cwd: projectDir,
-        env: childEnv,
-        maxBuffer: 100 * 1024 * 1024,
+  private computeFingerprint(files: readonly string[]): string {
+    const samples = files
+      .slice()
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map((file) => {
+        try {
+          const stat = fs.statSync(file);
+          return `${file}:${stat.size}:${Number(stat.mtimeMs.toFixed(0))}`;
+        } catch {
+          return `${file}:0:0`;
+        }
       });
 
-      const stderr = typeof result.stderr === 'string' ? result.stderr.trim() : String(result.stderr ?? '').trim();
-      const stdout = typeof result.stdout === 'string' ? result.stdout.trim() : String(result.stdout ?? '').trim();
-
-      if (result.error) {
-        const errorMessage = result.error instanceof Error ? result.error.message : String(result.error);
-        const details = [
-          `spawn: ${errorMessage}`,
-          stderr ? `stderr: ${stderr}` : undefined,
-          stdout ? `stdout: ${stdout}` : undefined,
-        ].filter(Boolean).join(' | ');
-
-        console.warn(`[DotNetDependencyResolver] Roslyn dependency resolver failed: ${details || 'dotnet could not be started'}`);
-        return [];
-      }
-
-      if (result.status !== 0) {
-        const details = [
-          `exitCode: ${result.status}`,
-          stderr ? `stderr: ${stderr}` : undefined,
-          stdout ? `stdout: ${stdout}` : undefined,
-        ].filter(Boolean).join(' | ');
-
-        console.warn(`[DotNetDependencyResolver] Roslyn dependency resolver failed: ${details || 'dotnet exited with a non-zero status'}`);
-        return [];
-      }
-
-      const stdoutText = stdout;
-      if (!stdout) {
-        return [];
-      }
-
-      const payload = JSON.parse(stdout) as { links?: Array<{ source: string; target: string; weight?: number; edgeType?: string }> };
-      const links = Array.isArray(payload.links) ? payload.links.map((entry) => ({
-        source: entry.source,
-        target: entry.target,
-        weight: Math.max(1, entry.weight ?? 1),
-        edgeType: entry.edgeType || 'file-reference',
-      })) : [];
-
-      onProgress?.(`[DotNetDependencyResolver] Roslyn graph ready: ${links.length} edge(s)`, 100, csFiles.length, Math.max(csFiles.length, 1));
-      return links;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[DotNetDependencyResolver] Roslyn dependency resolution failed; continuing without Roslyn results: ${message}`);
-      return [];
-    }
+    return samples.join(';');
   }
 
   private resolveRazorLinks(rootDir: string, files: string[]): GraphLink[] {

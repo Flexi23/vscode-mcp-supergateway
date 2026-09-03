@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Fixed
-- Fixed the CBM graph route so `/cbm/graph` no longer gets wrapped by the local dashboard shell; the graph UI now serves from a dedicated internal `CBM_UI_PORT` while the dashboard remains on `ADMIN_UI_PORT`.
-- Added the missing `CBM_UI_PORT` environment wiring through `docker-compose.yml` and the runtime config so the graph UI and dashboard are no longer sharing the same listener.
-- Added a regression test ensuring the CBM UI port stays distinct from the dashboard port and the dashboard does not claim the graph page as its own.
+- Fixed the CBM graph route so `/cbm/graph` no longer gets wrapped by the local dashboard shell; the graph UI keeps the upstream default internal port while the dashboard remains on `ADMIN_UI_PORT`.
+- Removed the host-side `CBM_UI_PORT` config from the runtime contract: the graph UI is an internal container concern and now uses the known upstream default without extra environment wiring.
+- Added a regression test ensuring the fixed internal graph UI port stays distinct from the dashboard port and the dashboard does not claim the graph page as its own.
 
 ## [2.5.0] - 2026-08-31
 ### Added

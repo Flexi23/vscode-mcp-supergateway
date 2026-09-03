@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import type { GraphLink, GraphUri } from './semanticEdgeResolutionStrategyDispatcher';
 
@@ -31,6 +32,13 @@ export const RESOLVER_TYPE_METADATA: Record<ResolverStrategyType, { label: strin
   },
 };
 
+const ENTRYPOINT_PATTERNS: Record<ResolverStrategyType, readonly string[]> = {
+  [ResolverStrategyType.DotNet]: ['.sln', '.csproj', '.fsproj'],
+  [ResolverStrategyType.TypeScript]: ['tsconfig.json', 'jsconfig.json', 'package.json'],
+  [ResolverStrategyType.Python]: ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile', 'poetry.lock'],
+  [ResolverStrategyType.Generic]: ['.sln', '.csproj', '.fsproj', 'tsconfig.json', 'jsconfig.json', 'package.json', 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'Pipfile', 'poetry.lock'],
+};
+
 export function normalizeResolverType(type?: string | ResolverStrategyType): ResolverStrategyType {
   const rawValue = (type ?? ResolverStrategyType.Generic).toString().trim().toLowerCase();
   if (Object.values(ResolverStrategyType).includes(rawValue as ResolverStrategyType)) {
@@ -52,6 +60,101 @@ export function getSupportedFileTypesForResolver(type?: string | ResolverStrateg
 export function getEdgeTypesForResolver(type?: string | ResolverStrategyType): string[] {
   const normalized = normalizeResolverType(type);
   return [...RESOLVER_TYPE_METADATA[normalized].edgeTypes];
+}
+
+export function getResolverTypeNameForLogs(type?: string | ResolverStrategyType): string {
+  const normalized = normalizeResolverType(type ?? ResolverStrategyType.Generic);
+  switch (normalized) {
+    case ResolverStrategyType.DotNet:
+      return 'DotNet';
+    case ResolverStrategyType.TypeScript:
+      return 'TypeScript';
+    case ResolverStrategyType.Python:
+      return 'Python';
+    case ResolverStrategyType.Generic:
+    default:
+      return 'Generic';
+  }
+}
+
+export function listEntrypointFilesForResolver(rootDir: string, type?: string | ResolverStrategyType, fallbackRootDir?: string): string[] {
+  const normalized = normalizeResolverType(type ?? ResolverStrategyType.Generic);
+  const resolvedRoot = resolveResolverRoot(rootDir, fallbackRootDir);
+  if (!resolvedRoot || !fs.existsSync(resolvedRoot)) {
+    return [];
+  }
+
+  const patterns = new Set((ENTRYPOINT_PATTERNS[normalized] ?? []).map((entry) => entry.toLowerCase()));
+  if (patterns.size === 0) {
+    return [];
+  }
+
+  const results: string[] = [];
+  const stack = [resolvedRoot];
+  const seen = new Set<string>();
+  const ignoredNames = new Set(['.git', 'node_modules', 'bin', 'obj', 'dist', '.venv', 'venv', '.next', '.nuget', '__pycache__', '.mypy_cache', '.pytest_cache']);
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (!fs.existsSync(current)) {
+      continue;
+    }
+
+    const stat = fs.statSync(current);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        if (ignoredNames.has(entry.name)) {
+          continue;
+        }
+        stack.push(path.join(current, entry.name));
+      }
+      continue;
+    }
+
+    const fileName = path.basename(current).toLowerCase();
+    const extension = path.extname(current).toLowerCase();
+    const matchesPattern = Array.from(patterns).some((pattern) => {
+      if (pattern.startsWith('.')) {
+        return extension === pattern;
+      }
+      return fileName === pattern || fileName.endsWith(path.basename(pattern).toLowerCase());
+    });
+
+    if (matchesPattern) {
+      results.push(current);
+    }
+  }
+
+  return results.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+}
+
+function resolveResolverRoot(rootDir: string | undefined, fallbackRootDir?: string): string | undefined {
+  const candidate = (rootDir ?? '').trim();
+  if (!candidate) {
+    return fallbackRootDir && fs.existsSync(fallbackRootDir) ? fallbackRootDir : undefined;
+  }
+
+  if (fs.existsSync(candidate)) {
+    return candidate;
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(candidate)) {
+    if (fallbackRootDir && fs.existsSync(fallbackRootDir)) {
+      return fallbackRootDir;
+    }
+    return undefined;
+  }
+
+  if (fallbackRootDir && fs.existsSync(fallbackRootDir)) {
+    return fallbackRootDir;
+  }
+
+  return candidate;
 }
 
 export abstract class ResolverStrategy {

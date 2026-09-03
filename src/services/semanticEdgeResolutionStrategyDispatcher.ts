@@ -3,7 +3,7 @@ import * as path from 'path';
 import { DotNetDependencyResolver } from './dotnetDependencyResolver';
 import { GenericSemanticFileDependencyResolver } from './genericSemanticFileDependencyResolver';
 import { PythonCallChainResolver } from './pythonCallChainResolver';
-import { ResolverStrategy, ResolverStrategyType } from './resolverStrategy';
+import { getResolverTypeNameForLogs, ResolverStrategy, ResolverStrategyType } from './resolverStrategy';
 import { TypeScriptDependencyResolver } from './typescriptDependencyResolver';
 
 export interface GraphLink {
@@ -97,16 +97,39 @@ export class SemanticEdgeResolutionStrategyDispatcher {
 
     const workspaceRoot = this.workspaceRoot || this.getDefaultRepositoryRoot(uniqueNodes);
     const links = new Map<string, GraphLink>();
-    const total = uniqueNodes.length;
+    const rootPassGroups = new Map<string, { strategy: ResolverStrategy; nodes: GraphUri[] }>();
+    const perFileGroups = new Map<string, { strategy: ResolverStrategy; nodes: GraphUri[] }>();
 
-    for (let index = 0; index < uniqueNodes.length; index += 1) {
-      const node = uniqueNodes[index];
+    for (const node of uniqueNodes) {
       const strategy = SemanticEdgeResolutionStrategyDispatcher.getStrategyForFile(node.fsPath).setRootDir(workspaceRoot);
-      const percent = Math.round(((index + 1) / total) * 100);
-      onProgress?.(`[${strategy.label}] ${path.basename(node.fsPath)} (${index + 1}/${total})`, percent, index + 1, total);
+      const targetGroups = this.canResolveAsRootPass(strategy) ? rootPassGroups : perFileGroups;
+      const key = `${workspaceRoot}\u0000${strategy.type}`;
+      const current = targetGroups.get(key);
+      if (current) {
+        current.nodes.push(node);
+      } else {
+        targetGroups.set(key, { strategy, nodes: [node] });
+      }
+    }
 
-      const strategyLinks = await strategy.resolveFile(node.fsPath);
-      this.mergeLinks(links, strategyLinks);
+    const groupEntries = [...Array.from(rootPassGroups.values()), ...Array.from(perFileGroups.values())];
+    for (let index = 0; index < groupEntries.length; index += 1) {
+      const group = groupEntries[index];
+      const resolverName = getResolverTypeNameForLogs(group.strategy.type);
+      const representative = group.nodes[0];
+      const summary = `${resolverName} ${path.relative(workspaceRoot || process.cwd(), representative.fsPath) || path.basename(representative.fsPath)} (${index + 1}/${groupEntries.length})`;
+      onProgress?.(`[${resolverName}] ${summary}`, Math.round(((index + 1) / groupEntries.length) * 100), index + 1, groupEntries.length);
+
+      if (this.canResolveAsRootPass(group.strategy)) {
+        const strategyLinks = await this.resolveStrategyRootGroup(workspaceRoot, group.strategy, group.nodes);
+        this.mergeLinks(links, strategyLinks);
+        continue;
+      }
+
+      for (const node of group.nodes) {
+        const strategyLinks = await group.strategy.resolveFile(node.fsPath);
+        this.mergeLinks(links, strategyLinks);
+      }
     }
 
     return Array.from(links.values());
@@ -120,19 +143,82 @@ export class SemanticEdgeResolutionStrategyDispatcher {
     }
 
     const links = new Map<string, GraphLink>();
-    const total = files.length;
+    const rootPassGroups = new Map<string, { strategy: ResolverStrategy; nodes: GraphUri[] }>();
+    const perFileGroups = new Map<string, { strategy: ResolverStrategy; nodes: GraphUri[] }>();
 
-    for (let index = 0; index < files.length; index += 1) {
-      const file = files[index];
+    for (const file of files) {
       const strategy = SemanticEdgeResolutionStrategyDispatcher.getStrategyForFile(file.fsPath).setRootDir(rootDir);
-      const percent = Math.round(((index + 1) / total) * 100);
-      onProgress?.(`[${strategy.label}] ${path.basename(file.fsPath)} (${index + 1}/${total})`, percent, index + 1, total);
+      const targetGroups = this.canResolveAsRootPass(strategy) ? rootPassGroups : perFileGroups;
+      const key = `${rootDir}\u0000${strategy.type}`;
+      const current = targetGroups.get(key);
+      if (current) {
+        current.nodes.push(file);
+      } else {
+        targetGroups.set(key, { strategy, nodes: [file] });
+      }
+    }
 
-      const strategyLinks = await strategy.resolveFile(file.fsPath);
-      this.mergeLinks(links, strategyLinks);
+    const groupEntries = [...Array.from(rootPassGroups.values()), ...Array.from(perFileGroups.values())];
+    for (let index = 0; index < groupEntries.length; index += 1) {
+      const group = groupEntries[index];
+      const resolverName = getResolverTypeNameForLogs(group.strategy.type);
+      const summary = `${resolverName} root pass (${index + 1}/${groupEntries.length})`;
+      onProgress?.(`[${resolverName}] ${summary}`, Math.round(((index + 1) / groupEntries.length) * 100), index + 1, groupEntries.length);
+
+      if (this.canResolveAsRootPass(group.strategy)) {
+        const strategyLinks = await this.resolveStrategyRootGroup(rootDir, group.strategy, group.nodes);
+        this.mergeLinks(links, strategyLinks);
+        continue;
+      }
+
+      for (const file of group.nodes) {
+        const strategyLinks = await group.strategy.resolveFile(file.fsPath);
+        this.mergeLinks(links, strategyLinks);
+      }
     }
 
     return Array.from(links.values());
+  }
+
+  private canResolveAsRootPass(strategy: ResolverStrategy): boolean {
+    return strategy.type === ResolverStrategyType.DotNet || strategy.type === ResolverStrategyType.TypeScript;
+  }
+
+  private async resolveStrategyRootGroup(rootDir: string, strategy: ResolverStrategy, files: readonly GraphUri[]): Promise<GraphLink[]> {
+    const filePaths = files
+      .map((file) => file.fsPath)
+      .filter((filePath) => strategy.supports(filePath));
+
+    if (filePaths.length === 0) {
+      return [];
+    }
+
+    if (strategy.type === ResolverStrategyType.DotNet) {
+      const resolver = strategy as any;
+      if (typeof resolver.extractEdges === 'function') {
+        return await resolver.extractEdges(rootDir, undefined, filePaths);
+      }
+    }
+
+    if (strategy.type === ResolverStrategyType.TypeScript) {
+      const resolver = strategy as any;
+      if (typeof resolver.extractTypeScriptEdgesFromFilesystem === 'function') {
+        return await resolver.extractTypeScriptEdgesFromFilesystem(rootDir, undefined, filePaths);
+      }
+    }
+
+    const links: GraphLink[] = [];
+    for (const filePath of filePaths) {
+      const resolvedLinks = await strategy.resolveFile(filePath);
+      for (const link of resolvedLinks) {
+        const key = `${link.source}\u0000${link.target}\u0000${link.edgeType}`;
+        if (!links.some((entry) => `${entry.source}\u0000${entry.target}\u0000${entry.edgeType}` === key)) {
+          links.push(link);
+        }
+      }
+    }
+
+    return links;
   }
 
   writeLinksFile(links: GraphLink[], outputPath: string): number {
