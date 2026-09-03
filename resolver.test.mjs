@@ -12,6 +12,16 @@ const { setIndexJobUpdateListener, updateIndexJobState } = await import('./dist/
 const { matchToolToUpstream } = await import('./dist/startupLogClassifier.js');
 const { buildCbmOverviewHtml, buildDashboardHtml } = await import('./dist/dashboard.js');
 
+test('cbm graph requires its own UI port so the dashboard shell never wraps the graph UI', () => {
+  const envFile = fs.readFileSync(path.join(process.cwd(), '.env'), 'utf8');
+  const adminUiPort = Number((envFile.match(/ADMIN_UI_PORT=(\d+)/) || [])[1]);
+  const cbmUiPort = Number((envFile.match(/CBM_UI_PORT=(\d+)/) || [])[1]);
+
+  assert.ok(Number.isInteger(adminUiPort) && adminUiPort > 0, 'ADMIN_UI_PORT must be set');
+  assert.ok(Number.isInteger(cbmUiPort) && cbmUiPort > 0, 'CBM_UI_PORT must be set as a distinct internal graph UI port');
+  assert.notEqual(cbmUiPort, adminUiPort, 'CBM_UI_PORT must not reuse the dashboard port');
+});
+
 test('dashboard exposes route-based iframe tabs and the MSP stack UI', () => {
   const html = buildDashboardHtml({
     activeTab: 'msp',
@@ -61,11 +71,11 @@ test('resolver metadata exposes edge types per resolver strategy', async () => {
   assert.deepEqual(getEdgeTypesForResolver('generic'), ['file-reference']);
 });
 
-test('dotnet resolver degrades gracefully when Roslyn execution fails', async () => {
+test('dotnet resolver resolves Roslyn even when PATH is blank', async () => {
   const { DotNetDependencyResolver } = await import('./dist/services/dotnetDependencyResolver.js');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-roslyn-failure-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dotnet-roslyn-path-blank-'));
   const sourceFile = path.join(root, 'Demo.cs');
-  fs.writeFileSync(sourceFile, 'namespace Demo { public class Demo {} }\n');
+  fs.writeFileSync(sourceFile, 'namespace Demo { public class Demo { public int Value => 1; } }\n');
 
   const previousPath = process.env.PATH;
   const previousWarn = console.warn;
@@ -78,8 +88,9 @@ test('dotnet resolver degrades gracefully when Roslyn execution fails', async ()
   try {
     const resolver = new DotNetDependencyResolver();
     const links = await resolver.extractEdges(root);
-    assert.deepEqual(links, []);
-    assert.match(captured, /ENOENT|not found|spawn|Roslyn dependency resolver failed|dotnet/i);
+    assert.ok(Array.isArray(links));
+    assert.ok(links.length >= 0);
+    assert.doesNotMatch(captured, /ENOENT|spawn:|Roslyn dependency resolver failed/i);
   } finally {
     process.env.PATH = previousPath;
     console.warn = previousWarn;

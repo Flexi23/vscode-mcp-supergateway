@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Fixed
+- Fixed the CBM graph route so `/cbm/graph` no longer gets wrapped by the local dashboard shell; the graph UI now serves from a dedicated internal `CBM_UI_PORT` while the dashboard remains on `ADMIN_UI_PORT`.
+- Added the missing `CBM_UI_PORT` environment wiring through `docker-compose.yml` and the runtime config so the graph UI and dashboard are no longer sharing the same listener.
+- Added a regression test ensuring the CBM UI port stays distinct from the dashboard port and the dashboard does not claim the graph page as its own.
+
 ## [2.5.0] - 2026-08-31
 ### Added
 - Added a Python call-chain resolver (`src/services/pythonCallChainResolver.ts`, `ResolverStrategyType.Python`) to the semantic edge resolution strategy dispatcher, registered alongside the existing .NET/TypeScript strategies. It spawns the container's `python3` running an embedded script built on the stdlib `ast` module (the real Python parser) to resolve intra-project imports and then walks each file's call expressions, resolving callees against per-file import bindings and a project-wide (unambiguous) symbol table, emitting file-level call-chain edges in the same `{source, target, weight}` shape as the other resolvers.

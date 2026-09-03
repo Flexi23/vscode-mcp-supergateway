@@ -5,7 +5,8 @@
   "main": "dist/gateway.js",
   "scripts": {
     "clean": "node -e \"const fs=require('fs'); const path='dist'; const backup=path + '.stale-' + Date.now(); try { if (fs.existsSync(path)) { fs.renameSync(path, backup); } fs.rmSync(backup, { recursive: true, force: true, maxRetries: 25, retryDelay: 200 }); } catch (error) { if (fs.existsSync(path)) { try { fs.rmSync(path, { recursive: true, force: true, maxRetries: 25, retryDelay: 200 }); } catch (inner) { throw inner; } } }\"",
-    "build": "npm run clean && tsc"
+    "build": "npm run clean && tsc",
+    "test:container": "node ./scripts/run-resolver-tests-in-container.mjs"
   },
   "overrides": {
     "zod": "3.25.76"

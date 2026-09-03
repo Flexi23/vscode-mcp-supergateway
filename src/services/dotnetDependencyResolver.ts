@@ -91,6 +91,64 @@ export class DotNetDependencyResolver extends ResolverStrategy {
     return result.sort();
   }
 
+  private resolveDotNetExecutable(): string {
+    const executableName = process.platform === 'win32' ? 'dotnet.exe' : 'dotnet';
+    const standardRoots = process.platform === 'win32'
+      ? [
+          process.env.DOTNET_ROOT,
+          process.env.ProgramFiles && path.join(process.env.ProgramFiles, 'dotnet'),
+          process.env['ProgramFiles(x86)'] && path.join(process.env['ProgramFiles(x86)'], 'dotnet'),
+          'C:\\Program Files\\dotnet',
+          'C:\\Program Files (x86)\\dotnet',
+        ]
+      : [
+          process.env.DOTNET_ROOT,
+          '/usr/share/dotnet',
+          '/usr/local/share/dotnet',
+          path.join(os.homedir(), '.dotnet'),
+        ];
+
+    const explicitRoots = standardRoots.filter((value): value is string => Boolean(value));
+    const pathRoots = (process.env.PATH ?? '')
+      .split(path.delimiter)
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    for (const root of [...explicitRoots, ...pathRoots]) {
+      const candidates = [
+        path.join(root, executableName),
+        path.join(root, process.platform === 'win32' ? 'dotnet.exe' : 'dotnet'),
+      ];
+
+      for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    if (process.env.PATH) {
+      const lookup = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', ['dotnet'], {
+        encoding: 'utf8',
+        env: process.env,
+        shell: false,
+      });
+
+      const firstMatch = typeof lookup.stdout === 'string'
+        ? lookup.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find((line) => line.length > 0)
+        : undefined;
+
+      if (firstMatch) {
+        return firstMatch;
+      }
+    }
+
+    return executableName;
+  }
+
   private resolveWithRoslyn(
     rootDir: string,
     files: string[],
@@ -261,10 +319,18 @@ Console.WriteLine(JsonSerializer.Serialize(new { links }));
 
       onProgress?.(`[DotNetDependencyResolver] building Roslyn graph for ${csFiles.length} C# file(s)`, 5, 0, Math.max(csFiles.length, 1));
 
-      const result = spawnSync('dotnet', ['run', '--project', projectFile, '--', '--root', rootDir], {
+      const dotnetExecutable = this.resolveDotNetExecutable();
+      const dotnetRoot = path.dirname(dotnetExecutable);
+      const childEnv = {
+        ...process.env,
+        DOTNET_ROOT: dotnetRoot,
+        PATH: [dotnetRoot, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      };
+
+      const result = spawnSync(dotnetExecutable, ['run', '--project', projectFile, '--', '--root', rootDir], {
         encoding: 'utf8',
         cwd: projectDir,
-        env: { ...process.env },
+        env: childEnv,
         maxBuffer: 100 * 1024 * 1024,
       });
 
