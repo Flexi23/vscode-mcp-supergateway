@@ -132,10 +132,8 @@ Then edit [`.env`](.env.example):
 | `SIYUAN_ACCESS_AUTH_CODE_BYPASS` | optional | Set to `true` to allow the local SiYuan container to start without an explicit auth code in a dev setup. |
 | `SIYUAN_WORKSPACE_DIR` | **required** | Absolute host path to the SiYuan workspace directory, mounted directly at `/siyuan/workspace` inside the `siyuan` container. This is intentionally independent from the Codebase Memory paths. |
 | `CBM_HOST_DATA_DIR` | **required** | Absolute host path for the gateway runtime data directory (the `gateway.db` and admin config), mounted into the `gateway` container at `/app/data`. This is separate from the CBM cache. |
-| `CBM_HOST_WORKSPACE_DIR` | **required** | Absolute host path on the machine that is mounted read-only into the `gateway` container at `/workspace`. This is the host-side source for the workspace tree Codebase Memory should browse. |
-| `CBM_AUTO_INDEX_ENABLED` | optional | Set to `true` to enable the startup auto-index; otherwise startup indexing stays off and `CBM_AUTO_INDEX_PATH` is ignored. |
-| `CBM_AUTO_INDEX_PATH` | only when enabled | Linux container path used for startup indexing. The runtime default is `/workspace`, not a Windows host path. |
-| `CBM_DEFAULT_PATH` | **required** | Linux container path that Codebase Memory opens by default in its UI. Keep this as `/workspace` so the UI sees the same root that the bind mount exposes. |
+| `CBM_HOST_WORKSPACE_DIR` | **required** | Absolute host path on the machine that is mounted read-only into the `gateway` container at `/workspace`. This remains the only host-side workspace variable; the container-side path is fixed by the runtime and code (`/workspace`). |
+| `CBM_AUTO_INDEX_ENABLED` | optional | Set to `true` to enable the startup auto-index; otherwise startup indexing stays off and the runtime default remains `/workspace`. |
 | `CBM_HOST_CACHE_DIR` | **required** | Absolute host path for the bind mount that Codebase Memory uses as its writable cache; it is mounted into the `gateway` container at `/root/cbm-cache`. The internal runtime variable inside the container remains `CBM_CACHE_DIR`. |
 | `LMSTUDIO_BASE_URL` | for the loopback tools | Defaults to `http://host.docker.internal:1234/v1`. Inside a container `localhost` means *the container*, so a host-side LM Studio must be reached via `host.docker.internal` (Docker Desktop only). |
 | `MARKDOWN_VAULT_ROOT` | **required** for repo-local help docs | Absolute path to the git-tracked markdown vault root, for example `C:\gitlab.uni-rostock.de\limati-inf\vscode-mcp-supergateway\vault`. This keeps the online help and local notes inside the project so the integrated MCP tools can read and update them without leaving the repository. |
@@ -172,6 +170,8 @@ docker compose logs gateway         # -> [upstream:*] connected (stdio) x6
 
 The local dashboard lives at <http://localhost:3100/> and exposes the Codebase Memory overview and project indexing/status. The graph UI itself is served on the upstream default internal port `9749`, and routed at `/cbm/graph` without wrapping the dashboard shell. The public MCP endpoint remains on port `8080`; the dashboard stays on port `3100`, and legacy browser routes are no longer exposed.
 
+The Codebase Memory progress stream sends a structured websocket payload for each update: `type`, `repoPath`, and the current job state. In addition to the percent, the payload includes `fileName`, `processedCount`, and `totalCount`, so the dashboard can show both the live file being processed and the absolute position within the total work queue.
+
 > Port numbers are a strict `.env` concern: every published and internal port must be declared in [.env](.env) and consumed in [`docker-compose.yml`](docker-compose.yml) as `${VAR}`. No numeric port literals are used as a second source of truth.
 
 ---
@@ -202,7 +202,7 @@ All six upstreams run inside the `gateway` container; the runtime column only sa
 
 | Upstream | Package | Runtime | Notes |
 |---|---|---|---|
-| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the container-side `CBM_AUTO_INDEX_PATH` on startup (typically `/workspace`), uses `CBM_DEFAULT_PATH` for the routed workspace view, and serves its graph UI on the upstream default internal container port `9749` while sharing `CBM_CACHE_DIR` with the routed dashboard process. |
+| `codebase-memory` | `codebase-memory-mcp` | Node | Auto-indexes the fixed runtime workspace root (`/workspace`) on startup when enabled, uses the same container path for the routed workspace view, and serves its graph UI on the upstream default internal container port `9749` while sharing `CBM_CACHE_DIR` with the routed dashboard process. |
 | `semantic-bridge` | local bridge | Node | Exposes C#, TypeScript, and Python workspace/file enumeration plus dependency/call-chain graph extraction via the stdio MCP server in [`src/semanticBridgeMcp.ts`](src/semanticBridgeMcp.ts). It is the container-local semantic bridge: the gateway aggregates a dedicated MCP tool surface for source indexing instead of reaching into the host editor directly. |
 | `supergateway-rpc` | local bridge | Node | Exposes the LM Studio task tools (`lmstudio_complete`, `lmstudio_summarize_diff`, `lmstudio_update_siyuan_task`) via the same MSPStack gateway aggregation, instead of a standalone loopback port. It is the local RPC/tool endpoint that sits alongside `semantic-bridge` in the gateway runtime. |
 | `siyuan-note` | [`siyuan-mcp`](https://www.npmjs.com/package/siyuan-mcp) | Node | Talks to the `siyuan` Docker Compose service (`SIYUAN_HOST=siyuan`, port `6806`) over its REST API; requires `SIYUAN_TOKEN` (SiYuan: Settings -> About -> API Token, see [.env.example](.env.example)). |
@@ -222,6 +222,8 @@ It does three things in sequence:
 1. Discover semantic source files under a project root.
 2. Resolve cross-file references for .NET sources through the Roslyn-based dependency resolver and parse the remaining non-.NET imports directly from the filesystem.
 3. Convert the resulting graph into a trace payload and ingest it with `codebase-memory-mcp cli ingest_traces`.
+
+On large repositories, the gateway writes the trace payload to a temp JSON args file instead of embedding the entire JSON in a single CLI argument. That avoids the OS-level `E2BIG`/argv-length failure while preserving the same `project` + `traces` payload contract for Codebase Memory.
 
 The current implementation is intentionally language-aware but not C#-only:
 

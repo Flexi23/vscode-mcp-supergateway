@@ -9,6 +9,9 @@ export interface IndexJobState {
   status: IndexJobStatus;
   message?: string;
   progress?: number;
+  fileName?: string;
+  processedCount?: number;
+  totalCount?: number;
   updatedAt: number;
 }
 
@@ -468,16 +471,20 @@ async function enrichCodebaseMemoryWithSemanticEdges(cacheDir: string, repoPath:
   }
 
   console.log(`[codebase-memory] starting semantic edge enrichment for ${path.basename(repoPath)} (${files.length} files)...`);
-  
-  const graphLinks = await extractor.extractEdges(files, (message: string, percent: number) => {
+
+  const graphLinks = await extractor.extractEdges(files, (message: string, percent: number, processed: number, total: number) => {
     const progress = Math.min(100, Math.max(0, Math.round(percent)));
+    const fileName = message.split(/\s+/).filter(Boolean).slice(-1)[0]?.replace(/\[.*?\]/g, '').trim() || undefined;
     updateIndexJobState(repoPath, {
       status: 'enriching',
       message,
       progress,
+      fileName,
+      processedCount: Number.isFinite(processed) ? processed : undefined,
+      totalCount: Number.isFinite(total) ? total : undefined,
       updatedAt: Date.now(),
     });
-    console.log(`[codebase-memory] ${message} [${progress}%]`);
+    console.log(`[codebase-memory] ${message} [${progress}%] (${processed}/${total})`);
   });
 
   if (graphLinks.length === 0) {
@@ -495,14 +502,23 @@ async function enrichCodebaseMemoryWithSemanticEdges(cacheDir: string, repoPath:
   const linksFile = path.join(cacheDir, 'semantic-edges.json');
   extractor.writeLinksFile(graphLinks, linksFile);
 
+  const argsFile = path.join(cacheDir, `semantic-ingest-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
+  fs.writeFileSync(argsFile, JSON.stringify({ project: projectName, traces: graphLinks }, null, 2), 'utf8');
+
   console.log(`[codebase-memory] ingesting ${graphLinks.length} semantic graph links into project ${projectName}...`);
   const child = childProcess.spawn(
     'npx',
-    ['-y', 'codebase-memory-mcp', 'cli', 'ingest_traces', '--project', projectName, '--traces', JSON.stringify(graphLinks)],
+    ['-y', 'codebase-memory-mcp', 'cli', 'ingest_traces', '--args-file', argsFile],
     { env: { ...process.env, CBM_CACHE_DIR: cacheDir }, stdio: 'inherit' },
   );
 
   child.on('exit', (exitCode) => {
+    try {
+      fs.rmSync(argsFile, { force: true });
+    } catch (cleanupError) {
+      console.warn(`[codebase-memory] failed to delete temporary trace args file ${argsFile}:`, cleanupError);
+    }
+
     if (exitCode === 0) {
       console.log(`[codebase-memory] injected ${graphLinks.length} semantic graph links into project ${projectName}`);
       return;

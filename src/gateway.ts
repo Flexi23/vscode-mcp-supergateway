@@ -37,7 +37,8 @@ const siyuanPort = requirePort('SIYUAN_PORT');
 const cbmUiPort = 9749;
 const cbmCacheDir = requireEnv('CBM_CACHE_DIR');
 const cbmHostWorkspaceDir = requireEnv('CBM_HOST_WORKSPACE_DIR');
-const cbmDefaultPath = normalizeContainerPath('CBM_DEFAULT_PATH', '/workspace');
+const cbmContainerWorkspacePath = '/workspace';
+const cbmDefaultPath = '/workspace';
 
 const sleep = (delayMs: number) => new Promise((resolve) => setTimeout(resolve, delayMs));
 
@@ -116,7 +117,7 @@ async function main() {
 
   const enableStartupAutoIndex = process.env.CBM_AUTO_INDEX_ENABLED === 'true';
   if (enableStartupAutoIndex) {
-    const startupIndexPath = normalizeContainerPath('CBM_AUTO_INDEX_PATH', '/workspace');
+    const startupIndexPath = cbmContainerWorkspacePath;
     autoIndexCodebaseMemory(cbmCacheDir, startupIndexPath);
   } else {
     console.log('[codebase-memory] startup auto-index is disabled; run index_repository manually for the first project index.');

@@ -166,7 +166,7 @@ async function handleDashboardRoutes(
     // The graph UI process only binds to the container's loopback interface, so its own
     // port isn't reachable via the docker port mapping; proxy it through the dashboard port.
     const upstreamPath = `${requestUrl.pathname.replace(/^\/cbm\/graph/, '') || '/'}${requestUrl.search}`;
-    proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true, upstreamPath);
+    proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true, runtime, upstreamPath);
     return true;
   }
 
@@ -223,6 +223,7 @@ function proxyRequestToUpstream(
   rewriteOriginToLoopback: boolean,
   redirectRootToAdmin: boolean,
   stripFrameHeaders: boolean,
+  runtime?: ProxyRuntimeConfig,
   overridePath?: string,
   locationRewrite?: { upstreamPrefix: string; mountPrefix: string },
 ) {
@@ -234,9 +235,10 @@ function proxyRequestToUpstream(
   }
   if (rewriteOriginToLoopback && requestUrl.pathname === '/api/browse') {
     const requestedPath = requestUrl.searchParams.get('path');
+    const defaultWorkspacePath = runtime?.cbmDefaultPath || '/workspace';
     const isEmptyOrStaleRoot = !requestedPath || requestedPath === '/' || requestedPath === '/root';
     if (isEmptyOrStaleRoot) {
-      requestUrl.searchParams.set('path', '/workspace');
+      requestUrl.searchParams.set('path', defaultWorkspacePath);
       targetPath = `${requestUrl.pathname}?${requestUrl.searchParams.toString()}`;
     }
   }
@@ -338,12 +340,12 @@ export function startDashboardServer(
     }
 
     if (dashboardEnabled && isCbmUiRequest(req, requestUrl)) {
-      proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true);
+      proxyRequestToUpstream(req, res, runtime.cbmUiPort, requestUrl, true, false, true, runtime);
       return;
     }
 
     if (dashboardEnabled && isMspAdminApiRequest(requestUrl)) {
-      proxyRequestToUpstream(req, res, runtime.mspGatewayPort, requestUrl, true, false, true);
+      proxyRequestToUpstream(req, res, runtime.mspGatewayPort, requestUrl, true, false, true, runtime);
       return;
     }
 
@@ -440,7 +442,15 @@ export function startForwardProxy(
       return;
     }
 
-    proxyRequestToUpstream(req, res, targetPort, requestUrl, rewriteOriginToLoopback, redirectRootToAdmin, stripFrameHeaders);
+    proxyRequestToUpstream(req, res, targetPort, requestUrl, rewriteOriginToLoopback, redirectRootToAdmin, stripFrameHeaders, {
+      adminUiPort,
+      mspGatewayPort,
+      siyuanPort,
+      cbmUiPort,
+      cbmDefaultPath,
+      cbmCacheDir,
+      cbmHostWorkspaceDir,
+    });
   });
 
   const shouldServeProgressStream = dashboardEnabled && port === Number(process.env.ADMIN_UI_PORT);

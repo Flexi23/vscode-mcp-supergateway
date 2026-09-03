@@ -12,10 +12,7 @@
       "namespace": "semanticbridge",
       "transport": "stdio",
       "command": "node",
-      "args": ["/app/dist/semanticBridgeMcp.js"],
-      "env": {
-        "CBM_DEFAULT_PATH": "/workspace"
-      }
+      "args": ["/app/dist/semanticBridgeMcp.js"]
     },
     {
       "id": "supergateway-rpc",

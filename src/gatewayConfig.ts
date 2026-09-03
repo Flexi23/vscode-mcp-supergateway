@@ -133,6 +133,12 @@ export function buildAdminConfig(cbmCacheDir: string): GatewayConfig {
     if (upstream.id === 'codebase-memory') {
       upstream.env = { ...upstream.env, CBM_CACHE_DIR: cbmCacheDir };
     }
+    if (upstream.id === 'semantic-bridge') {
+      upstream.env = {
+        ...upstream.env,
+        CBM_DEFAULT_PATH: '/workspace',
+      };
+    }
   }
 
   return config;

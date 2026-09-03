@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Changed
+- The container-side Codebase Memory workspace is now a fixed runtime constant (`/workspace`) instead of being carried as a host-specific env value; only the host mount path remains configurable via `CBM_HOST_WORKSPACE_DIR`, so the runtime and code no longer drift between local setup and container behavior.
+- The Codebase Memory progress WebSocket payload now includes the active file plus absolute counters (`fileName`, `processedCount`, `totalCount`) alongside the percentage, and the dashboard renders those values in the per-project status text instead of only the raw percent.
+
 ### Fixed
 - Fixed the CBM graph route so `/cbm/graph` no longer gets wrapped by the local dashboard shell; the graph UI keeps the upstream default internal port while the dashboard remains on `ADMIN_UI_PORT`.
 - Removed the host-side `CBM_UI_PORT` config from the runtime contract: the graph UI is an internal container concern and now uses the known upstream default without extra environment wiring.
 - Added a regression test ensuring the fixed internal graph UI port stays distinct from the dashboard port and the dashboard does not claim the graph page as its own.
+- Fixed the semantic edge ingest for large repositories by writing the trace payload to a temp JSON args file instead of passing `JSON.stringify(graphLinks)` as one giant CLI argument. This avoids the `spawn E2BIG` failure when the OS command-line buffer is exceeded.
 
 ## [2.5.0] - 2026-08-31
 ### Added

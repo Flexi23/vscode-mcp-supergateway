@@ -334,11 +334,15 @@ export function buildCbmOverviewHtml({
         return 'unchecked';
       }
 
-      function renderActionsCell(actionsEl, projectName, projectPath, state, progress) {
+      function renderActionsCell(actionsEl, projectName, projectPath, state, progress, job) {
         const encodedPath = encodeURIComponent(projectPath);
         const graphLink = '<a class="text-action graph-link" href="/cbm/graph?tab=graph&project=' + encodeURIComponent(projectName) + '" target="_blank" rel="noopener noreferrer">Open 3D graph</a>';
         const effectiveProgress = typeof progress === 'number' ? Math.min(100, Math.max(0, Math.round(progress))) : null;
         const progressSuffix = effectiveProgress === null ? '' : ' ' + effectiveProgress + '%';
+        const counterSuffix = (job && typeof job.processedCount === 'number' && typeof job.totalCount === 'number' && job.totalCount > 0)
+          ? ' (' + job.processedCount + '/' + job.totalCount + ')'
+          : '';
+        const fileSuffix = job && job.fileName ? ' • ' + job.fileName : '';
 
         const setInner = (html) => {
           actionsEl.innerHTML = '<div class="actions-inner">' + html + '</div>';
@@ -355,12 +359,12 @@ export function buildCbmOverviewHtml({
         }
 
         if (state === 'indexing') {
-          setInner('<span class="muted-action">indexing…' + progressSuffix + '</span>');
+          setInner('<span class="muted-action">indexing…' + progressSuffix + counterSuffix + fileSuffix + '</span>');
           return;
         }
 
         if (state === 'ingesting semantics') {
-          setInner('<span class="muted-action">ingesting semantics…' + progressSuffix + '</span>');
+          setInner('<span class="muted-action">ingesting semantics…' + progressSuffix + counterSuffix + fileSuffix + '</span>');
           return;
         }
 
@@ -450,7 +454,7 @@ export function buildCbmOverviewHtml({
           row.classList.toggle('ingesting-row', state === 'ingesting semantics');
           row.classList.toggle('indexed-row', state === 'active');
           const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : projectPath.split(/[\\/]/).filter(Boolean).pop() || 'project';
-          renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress);
+          renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress, job);
         });
       }
 
@@ -506,7 +510,7 @@ export function buildCbmOverviewHtml({
                 row.classList.toggle('indexed-row', state === 'active');
                 const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
                 const projectPath = decodeURIComponent(row.dataset.path || '');
-                renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress);
+                renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, progress, job);
               });
               return;
             }
@@ -523,7 +527,7 @@ export function buildCbmOverviewHtml({
               row.classList.toggle('indexed-row', state === 'active');
               const projectName = row.firstChild && row.firstChild.textContent ? row.firstChild.textContent : 'project';
               const projectPath = decodeURIComponent(row.dataset.path || '');
-              renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, job.progress ?? null);
+              renderActionsCell(row.querySelector('.actions'), projectName, projectPath, state, job.progress ?? null, job);
             }
           } catch (error) {
             console.warn('failed to parse progress update', error);

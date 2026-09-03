@@ -6,7 +6,7 @@ import { PythonCallChainResolver } from './services/pythonCallChainResolver';
 import { getEdgeTypesForResolver, getSupportedFileTypesForResolver, listEntrypointFilesForResolver as findEntrypointFilesForResolver, listResolverTypes, normalizeResolverType, ResolverStrategyType } from './services/resolverStrategy';
 import { SemanticEdgeResolutionStrategyDispatcher, TypeScriptDependencyResolver } from './services/semanticEdgeResolutionStrategyDispatcher';
 
-const workspaceRoot = '/workspace';
+const workspaceRoot = process.env.CBM_DEFAULT_PATH ?? '/workspace';
 
 const resolverTypeSchema = z.enum(['dotnet', 'typescript', 'python', 'generic']);
 

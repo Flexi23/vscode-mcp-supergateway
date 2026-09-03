@@ -424,6 +424,30 @@ test('workspace host paths and /workspace paths merge to the same project rows a
   }
 });
 
+test('index job websocket payload carries the active file and absolute progress counts', () => {
+  const seen = [];
+  const previous = setIndexJobUpdateListener((repoPath, job) => {
+    seen.push({ repoPath, job });
+  });
+
+  updateIndexJobState('/workspace/demo', {
+    status: 'enriching',
+    message: 'processing alpha.ts',
+    progress: 42,
+    fileName: 'alpha.ts',
+    processedCount: 42,
+    totalCount: 100,
+    updatedAt: Date.now(),
+  });
+
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].repoPath, '/workspace/demo');
+  assert.equal(seen[0].job.fileName, 'alpha.ts');
+  assert.equal(seen[0].job.processedCount, 42);
+  assert.equal(seen[0].job.totalCount, 100);
+  setIndexJobUpdateListener(previous);
+});
+
 test('supergateway-rpc is registered as an MCP upstream beside semantic-bridge', () => {
   const config = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'docker', 'gateway.config.json'), 'utf8'));
   const rpcUpstream = config.upstreams.find((upstream) => upstream.id === 'supergateway-rpc');
